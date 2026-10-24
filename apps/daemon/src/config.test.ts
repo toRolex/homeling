@@ -77,6 +77,23 @@ describe("daemonConfigFromEnv", () => {
     });
   });
 
+  test("public origin is canonical and defaults to HTTPS 443 without blocking local startup", () => {
+    const base = { HOMELING_TAILSCALE_HOST: "home.ts.net", HOMELING_PUBLIC_ORIGIN: "" };
+    expect(daemonConfigFromEnv(base)).toMatchObject({ publicOrigin: "https://home.ts.net" });
+    expect(daemonConfigFromEnv({ ...base, HOMELING_TAILSCALE_HOST: "" })).toMatchObject({ publicOrigin: "" });
+    for (const origin of ["https://HOME.ts.net:443/", "https://home.ts.net"]) {
+      expect(daemonConfigFromEnv({ ...base, HOMELING_PUBLIC_ORIGIN: origin })).toMatchObject({ publicOrigin: "https://home.ts.net" });
+    }
+    expect(daemonConfigFromEnv({ ...base, HOMELING_PUBLIC_ORIGIN: "https://home.ts.net:8443/" })).toMatchObject({ publicOrigin: "https://home.ts.net:8443" });
+  });
+
+  test("explicit public origin rejects malformed or mismatched front doors", () => {
+    for (const origin of ["not a URL", "http://home.ts.net:8443", "https://other.ts.net:8443", "https://alice@home.ts.net", "https://home.ts.net/lite/", "https://home.ts.net/?x=1", "https://home.ts.net/#x"]) {
+      expect(() => daemonConfigFromEnv({ HOMELING_TAILSCALE_HOST: "home.ts.net", HOMELING_PUBLIC_ORIGIN: origin })).toThrow(/HOMELING_PUBLIC_ORIGIN/);
+    }
+    expect(() => daemonConfigFromEnv({ HOMELING_TAILSCALE_HOST: "", HOMELING_PUBLIC_ORIGIN: "https://home.ts.net:8443" })).toThrow(/HOMELING_PUBLIC_ORIGIN/);
+  });
+
   test("invalid port falls back to default", () => {
     const c = daemonConfigFromEnv({ HOMELING_PORT: "not-a-port" });
     expect(c.port).toBe(8790);
