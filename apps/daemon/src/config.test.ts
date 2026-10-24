@@ -81,7 +81,7 @@ describe("daemonConfigFromEnv", () => {
     const base = { HOMELING_TAILSCALE_HOST: "home.ts.net", HOMELING_PUBLIC_ORIGIN: "" };
     expect(daemonConfigFromEnv(base)).toMatchObject({ publicOrigin: "https://home.ts.net" });
     expect(daemonConfigFromEnv({ ...base, HOMELING_TAILSCALE_HOST: "" })).toMatchObject({ publicOrigin: "" });
-    for (const origin of ["https://HOME.ts.net:443/", "https://home.ts.net"]) {
+    for (const origin of ["https://HOME.ts.net:443/", "HTTPS://HOME.ts.net:443/", "https://home.ts.net", "https://home.ts.net/"]) {
       expect(daemonConfigFromEnv({ ...base, HOMELING_PUBLIC_ORIGIN: origin })).toMatchObject({ publicOrigin: "https://home.ts.net" });
     }
     expect(daemonConfigFromEnv({ ...base, HOMELING_PUBLIC_ORIGIN: "https://home.ts.net:8443/" })).toMatchObject({ publicOrigin: "https://home.ts.net:8443" });
@@ -92,6 +92,33 @@ describe("daemonConfigFromEnv", () => {
       expect(() => daemonConfigFromEnv({ HOMELING_TAILSCALE_HOST: "home.ts.net", HOMELING_PUBLIC_ORIGIN: origin })).toThrow(/HOMELING_PUBLIC_ORIGIN/);
     }
     expect(() => daemonConfigFromEnv({ HOMELING_TAILSCALE_HOST: "", HOMELING_PUBLIC_ORIGIN: "https://home.ts.net:8443" })).toThrow(/HOMELING_PUBLIC_ORIGIN/);
+  });
+
+  test.each([
+    "https://home.ts.net:8443/?",
+    "https://home.ts.net:8443/#",
+    "https://home.ts.net:8443?",
+    "https://home.ts.net:8443#",
+    "https://home.ts.net:8443/lite/..",
+    "https://home.ts.net:8443/%2e/",
+    "https:home.ts.net:8443",
+    "https:/home.ts.net:8443",
+    "https:///home.ts.net:8443",
+    "https://@home.ts.net:8443",
+    "https://:@home.ts.net:8443",
+    "https://home.ts.net:8443\\",
+    "https:\\\\home.ts.net:8443",
+    "https://home.ts.net:",
+    "https://home.ts.net:8443//",
+    " https://home.ts.net:8443",
+    "https://home.ts.net:8443 ",
+    "https://home.\tts.net:8443",
+    "https://home.ts.net:8443\n",
+    "https://home.ts.net:8443\r",
+    "https://home.ts.net:8443\u0000",
+    "\t",
+  ])("explicit public origin rejects raw syntax %j before URL normalization", (origin) => {
+    expect(() => daemonConfigFromEnv({ HOMELING_TAILSCALE_HOST: "home.ts.net", HOMELING_PUBLIC_ORIGIN: origin })).toThrow(/HOMELING_PUBLIC_ORIGIN/);
   });
 
   test("invalid port falls back to default", () => {
