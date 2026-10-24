@@ -13,7 +13,7 @@ const screen = 'Bash command\n\n  mkfifo fixture-fifo\n\nDo you want to proceed?
 test('a current real colon-bearing pane ID approves through the exact normalized bridge keys URL', async () => {
   const dir = await mkdtemp(join(await realpath(tmpdir()), 'homeling-push-colon-'));
   try {
-    const cfg = { ...daemonConfigFromEnv({}), tailscaleHost: 'home.example', trustedUsers: ['alice'] };
+    const cfg = { ...daemonConfigFromEnv({}), tailscaleHost: 'home.example', publicOrigin: 'https://home.example', trustedUsers: ['alice'] };
     const activity = new ActivityLedger(join(dir, 'activity.json'));
     const task = await activity.register({ personaId: 'persona-real', spaceId: 'w1', paneId: 'w1:p2', title: 'Approve FIFO' }, fixtureAdmission());
     activity.live(createDaemonSystemAdmissions().activityObserve);
@@ -38,7 +38,7 @@ test('a current real colon-bearing pane ID approves through the exact normalized
 test('task approval deep-link reads only current scoped pending; a gap during approval validation prevents all key dispatch', async () => {
   const dir = await mkdtemp(join(await realpath(tmpdir()), 'homeling-push-approval-'));
   try {
-    const cfg = { ...daemonConfigFromEnv({}), tailscaleHost: 'home.example', trustedUsers: ['alice'] };
+    const cfg = { ...daemonConfigFromEnv({}), tailscaleHost: 'home.example', publicOrigin: 'https://home.example', trustedUsers: ['alice'] };
     const activity = new ActivityLedger(join(dir, 'activity.json'));
     const caps = createDaemonSystemAdmissions();
     const task = await activity.register({ personaId: 'persona-real', spaceId: 'w1', paneId: 'task', title: 'Approve FIFO' }, fixtureAdmission());

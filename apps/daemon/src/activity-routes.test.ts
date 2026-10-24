@@ -16,7 +16,7 @@ afterEach(async () => { await Promise.all(roots.splice(0).map((path) => rm(path,
 
 test("scoped history rechecks the real occurrence after upstream body arrival and stale controls never dispatch", async () => {
   const root = await mkdtemp(join(tmpdir(), "homeling-scoped-activity-")); roots.push(root);
-  const cfg = { ...daemonConfigFromEnv({ HOMELING_REGISTRY_PATH: join(root, "registry.json") }), trustedUsers: ["me"], tailscaleHost: "home.tail.test" };
+  const cfg = { ...daemonConfigFromEnv({ HOMELING_REGISTRY_PATH: join(root, "registry.json") }), trustedUsers: ["me"], tailscaleHost: "home.tail.test", publicOrigin: "https://home.tail.test" };
   const activity = new ActivityLedger(join(root, "activity.json"));
   const session = new SessionLock(); const { token } = session.unlock("test");
   const user = session.admission(session.admit(token, "test"));
@@ -47,7 +47,7 @@ test("scoped history rechecks the real occurrence after upstream body arrival an
 
 test("scoped replies share the native cancellation barrier while busy and after an unknown key result", async () => {
   const root = await mkdtemp(join(tmpdir(), "homeling-scoped-cancel-")); roots.push(root);
-  const cfg = { ...daemonConfigFromEnv({ HOMELING_REGISTRY_PATH: join(root, "registry.json") }), trustedUsers: ["me"], tailscaleHost: "home.tail.test" };
+  const cfg = { ...daemonConfigFromEnv({ HOMELING_REGISTRY_PATH: join(root, "registry.json") }), trustedUsers: ["me"], tailscaleHost: "home.tail.test", publicOrigin: "https://home.tail.test" };
   const activity = new ActivityLedger(join(root, "activity.json"));
   const lock = new SessionLock(); const { token } = lock.unlock("test");
   const occurrence = await activity.register({ personaId: "a", spaceId: "s", paneId: "p", title: "Build" }, lock.admission(lock.admit(token, "test")));

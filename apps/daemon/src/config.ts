@@ -18,6 +18,7 @@ export interface DaemonConfig {
   readonly trustedUsers: readonly string[];
   /** The node's tailscale DNS name (no port), accepted in the Host allowlist. */
   readonly tailscaleHost: string;
+  readonly publicOrigin: string;
   /** Operator opt-out mirroring Collie's COLLIE_ALLOW_ANY_HOST. */
   readonly allowAnyHost: boolean;
   /**
@@ -84,6 +85,21 @@ function readBridgeOrigin(value: string | undefined): string {
   return url.origin;
 }
 
+function readPublicOrigin(value: string | undefined, tailscaleHost: string): string {
+  const raw = value?.trim();
+  if (!raw && !tailscaleHost) return "";
+  let url: URL;
+  try {
+    url = new URL(raw || `https://${tailscaleHost}`);
+  } catch {
+    throw new Error("HOMELING_PUBLIC_ORIGIN must be an HTTPS origin matching HOMELING_TAILSCALE_HOST");
+  }
+  if (url.protocol !== "https:" || url.hostname !== tailscaleHost.toLowerCase() || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("HOMELING_PUBLIC_ORIGIN must be an HTTPS origin matching HOMELING_TAILSCALE_HOST");
+  }
+  return url.origin;
+}
+
 export function daemonConfigFromEnv(env: Record<string, string | undefined>): DaemonConfig {
   const port = readPort(env.HOMELING_PORT ?? process.env.HOMELING_PORT);
   const webDist = env.HOMELING_WEB_DIST ?? process.env.HOMELING_WEB_DIST ?? join(repoRoot(), "apps", "web", "dist");
@@ -103,6 +119,7 @@ export function daemonConfigFromEnv(env: Record<string, string | undefined>): Da
     indexHtml: "index.html",
     trustedUsers,
     tailscaleHost,
+    publicOrigin: readPublicOrigin(env.HOMELING_PUBLIC_ORIGIN ?? process.env.HOMELING_PUBLIC_ORIGIN, tailscaleHost),
     allowAnyHost,
     bridgeOrigin,
     activityPath: env.HOMELING_ACTIVITY_PATH ?? process.env.HOMELING_ACTIVITY_PATH,

@@ -144,7 +144,7 @@ async function fixture(options: { failSendKeys?: boolean; failFirstReplyPartial?
   let failNextPartialReply = options.failFirstReplyPartial ?? false;
   const cfg: DaemonConfig = {
     port: 8790, hostname: "127.0.0.1", webDist: root, indexHtml: "index.html",
-    trustedUsers: ["me@github.com"], tailscaleHost: "homeling.tail1234.ts.net", allowAnyHost: false,
+    trustedUsers: ["me@github.com"], tailscaleHost: "homeling.tail1234.ts.net", publicOrigin: "https://homeling.tail1234.ts.net", allowAnyHost: false,
     bridgeOrigin: "http://127.0.0.1:8787", registryPath: join(root, "registry.json"), herdrSocketPath: socketPath,
   };
   const deliveries: Array<{ url: string; body: unknown }> = [];

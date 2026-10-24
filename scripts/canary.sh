@@ -36,24 +36,30 @@ collie_fingerprint() {
   echo "$modified $(shasum -a 256 "$bin" | cut -d' ' -f1)"
 }
 
+valid_authority() {
+  [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*:443$ ]]
+}
+
 root_handler() {
-  # The `/` handler of the sole serve listener; empty output means it is gone or unreadable.
   tailscale serve status --json 2>/dev/null | bun -e '
     const { parseServeStatusRootProxy } = await import(process.argv[1]);
-    const root = parseServeStatusRootProxy(await new Response(Bun.stdin.stream()).text());
+    const root = parseServeStatusRootProxy(await new Response(Bun.stdin.stream()).text(), process.argv[2]);
     if (!root) process.exit(1);
     console.log(root);
-  ' "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../apps/daemon/src" && pwd)/canary.ts"
+  ' "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../apps/daemon/src" && pwd)/canary.ts" "$1"
 }
 
 cmd_save() {
   [ -d "$COLLIE_DIR" ] || fail "collie dir not found: $COLLIE_DIR"
-  local root; root=$(root_handler)
-  [ -n "$root" ] || fail "cannot read an unambiguous tailscale serve root handler"
+  local authority="${HOMELING_CANARY_SERVE_AUTHORITY:-}"
+  valid_authority "$authority" || fail "HOMELING_CANARY_SERVE_AUTHORITY must be the protected DNS:443 key"
+  local root; root=$(root_handler "$authority")
+  [ -n "$root" ] || fail "cannot read the protected tailscale serve root handler"
   [ "$root" = "$SERVE_ROOT_PROXY" ] || fail "root handler does not match the protected proxy"
   cat > "$STATE_FILE" <<EOF
 COLLIE_HEAD='$(snap)'
 COLLIE_BIN='$(collie_fingerprint)'
+SERVE_AUTHORITY='$authority'
 ROOT_HANDLER='$root'
 EOF
   echo "[canary] saved state to $STATE_FILE"
@@ -64,8 +70,14 @@ EOF
 
 cmd_check() {
   [ -f "$STATE_FILE" ] || fail "no saved state at $STATE_FILE — run 'canary.sh save' first"
+  local SERVE_AUTHORITY="" ROOT_HANDLER=""
   # shellcheck disable=SC1090
   source "$STATE_FILE"
+  valid_authority "$SERVE_AUTHORITY" || fail "saved protected DNS:443 key missing or invalid; save a new baseline"
+  [ -n "$ROOT_HANDLER" ] || fail "saved root handler missing"
+  if [ -n "${HOMELING_CANARY_SERVE_AUTHORITY:-}" ] && [ "$HOMELING_CANARY_SERVE_AUTHORITY" != "$SERVE_AUTHORITY" ]; then
+    fail "protected serve authority differs from saved baseline"
+  fi
 
   local rc=0
 
@@ -88,7 +100,7 @@ cmd_check() {
     echo "[canary] ok: bin/collie untouched"
   fi
 
-  local now_root; now_root=$(root_handler)
+  local now_root; now_root=$(root_handler "$SERVE_AUTHORITY") || fail "cannot read the saved protected root handler"
   if [ "$now_root" != "$ROOT_HANDLER" ]; then
     echo "[canary] FAIL: tailscale serve root handler changed:"
     echo "[canary]   was: $ROOT_HANDLER"

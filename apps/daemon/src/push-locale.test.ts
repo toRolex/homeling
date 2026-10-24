@@ -64,7 +64,7 @@ test("native output and explicit test sends render each subscription locale with
 test("actual HTTP locale entry reuses Origin, JSON and user-session admission without native sends", async () => {
   const dir = await mkdtemp(join(await realpath(tmpdir()), "homeling-push-locale-http-"));
   try {
-    const cfg = { ...daemonConfigFromEnv({}), tailscaleHost: "home.example", trustedUsers: ["alice"] };
+    const cfg = { ...daemonConfigFromEnv({}), tailscaleHost: "home.example", publicOrigin: "https://home.example", trustedUsers: ["alice"] };
     const sessions = new SessionController({ verify: () => secret => secret === "a".repeat(43) });
     let sends = 0;
     const runtime = { store: new PushStore(join(dir, "push.json")), publicKey: "public", transport: { send: async () => { sends++; return { status: "sent" as const }; } } };

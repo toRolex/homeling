@@ -27,7 +27,7 @@ function request(path: string, options: { method?: string; body?: string; conten
 }
 
 function cfg() {
-  return { ...daemonConfigFromEnv({}), registryPath: join(tmpdir(), `homeling-request-fixture-${crypto.randomUUID()}`, 'registry.json'), bridgeOrigin: "http://127.0.0.1:8787", tailscaleHost: "homeling.tail1234.ts.net", trustedUsers: ["me@github.com"] };
+  return { ...daemonConfigFromEnv({}), registryPath: join(tmpdir(), `homeling-request-fixture-${crypto.randomUUID()}`, 'registry.json'), bridgeOrigin: "http://127.0.0.1:8787", tailscaleHost: "homeling.tail1234.ts.net", publicOrigin: "https://homeling.tail1234.ts.net", trustedUsers: ["me@github.com"] };
 }
 
 describe("pending request daemon routes", () => {

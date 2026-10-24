@@ -52,6 +52,7 @@ HOMELING_DATA_DIR="$HOME/Library/Application Support/Homeling" \
 export HOMELING_TRUSTED_USERS='you@example.com'
 export HOMELING_TAILSCALE_HOST='your-mac.tailxxxx.ts.net'
 export HOMELING_PORT=8790
+export HOMELING_PUBLIC_ORIGIN="https://${HOMELING_TAILSCALE_HOST}:8443"
 bash scripts/install-launchd.sh
 launchctl print "gui/$(id -u)/com.homeling.daemon"
 curl -fsS http://127.0.0.1:8790/lite/api/health
@@ -59,13 +60,14 @@ curl -fsS http://127.0.0.1:8790/lite/api/health
 
 正确安装入口是 `bash scripts/install-launchd.sh`，不是不存在的 workspace `install:launchd` script。脚本写入 `~/Library/LaunchAgents/com.homeling.daemon.plist`，记录 Bun 与 daemon entry 的绝对路径，配置 `RunAtLoad` / `KeepAlive`，日志位于 `~/.local/share/homeling/log/daemon.{out,err}.log`。不要用 `sudo` 安装此用户 agent。
 
-**环境持久化边界**：安装脚本将 `HOMELING_PORT`、非空 `HOMELING_TRUSTED_USERS` 和 `HOMELING_TAILSCALE_HOST` 写入 plist 的 `EnvironmentVariables`；后续 shell export 不会改变已运行的 agent。修改它们后须带着完整配置重新运行安装脚本。重装会覆盖 plist，漏传身份配置会使远程访问 fail-closed。脚本不设置 WorkingDirectory，不依赖根目录 `.env`，也不自动持久化全部 shell 环境。
+**环境持久化边界**：安装脚本将 `HOMELING_PORT`、非空 `HOMELING_TRUSTED_USERS` 、`HOMELING_TAILSCALE_HOST` 和非空 `HOMELING_PUBLIC_ORIGIN` 写入 plist 的 `EnvironmentVariables`；后续 shell export 不会改变已运行的 agent。重装会覆盖整个 plist，不合并现有环境项，漏传身份配置会使远程访问 fail-closed。已有生产配置不得直接重跑 installer。获准部署时，只定向添加或更新既有 plist 的非秘密 `HOMELING_PUBLIC_ORIGIN` 项，保留 PUSH_SUBJECT、PUSH_DIR、DATA_DIR 等所有原项，再按批准流程重新加载。无法保证保留时停止部署。备份不要输出凭据。脚本不设置 WorkingDirectory，不依赖根目录 `.env`，也不自动持久化全部 shell 环境。
 
 | 变量 | 默认 / 用途 | 安装脚本持久化 |
 | --- | --- | --- |
 | `HOMELING_PORT` | `8790`，daemon 始终绑定 loopback | 是 |
 | `HOMELING_TRUSTED_USERS` | 空，拒绝远程用户；逗号分隔登录名 | 非空时 |
 | `HOMELING_TAILSCALE_HOST` | 空，只允许本地 Host；填完整 DNS 名 | 非空时 |
+| `HOMELING_PUBLIC_ORIGIN` | 未设置时由 Tailscale host 派生 HTTPS 443；本部署显式设置 `https://your-mac.tailxxxx.ts.net:8443` | 非空时 |
 | `HOMELING_REPO` | 安装脚本所在仓库；可指定绝对路径 | 通过 daemon entry 路径体现 |
 | `HOMELING_WEB_DIST` | 本仓库 `apps/web/dist` | 否，仅 daemon 环境支持 |
 | `HOMELING_BRIDGE_ORIGIN` | `http://127.0.0.1:8787`，仅支持 loopback HTTP origin | 否，仅 daemon 环境支持 |
@@ -81,21 +83,26 @@ curl -fsS http://127.0.0.1:8790/lite/api/health
 
 推荐保持默认端口/产物/bridge 地址。非默认 `WEB_DIST` / `BRIDGE_ORIGIN` 需自行在 plist 中明确配置并重新加载，单纯 export 后运行安装脚本不生效。不要关闭 Host 检查来解决 403。
 
-### 4. 添加 `/lite/` 分流（保留根路径）
+### 4. 添加独立 HTTPS 8443 入口
 
-先保存金丝雀基线，再仅添加本项目的 handler。金丝雀需要 Bun / Git / Tailscale，默认面向单个 Serve listener。
+先确认 8443 未占用、tailnet 策略允许受控客户端访问该端口。保存固定 DNS:443 金丝雀基线，再仅新增 8443 listener。8443 的 `/` 代理到 `http://127.0.0.1:8790`，不设置 `/lite/` mount，也不在 target 附加 `/lite/`。完整请求路径必须透传。
 
 ```bash
 export HOMELING_CANARY_STATE="$HOME/.local/share/homeling/canary-state.env"
+export HOMELING_CANARY_SERVE_AUTHORITY="${HOMELING_TAILSCALE_HOST}:443"
 bash scripts/canary.sh save
-tailscale serve --bg --https=443 --set-path=/lite/ 8790
+tailscale serve --bg --https=8443 http://127.0.0.1:8790
 tailscale serve status --json
 HOMELING_CANARY_DAEMON_URL=http://127.0.0.1:8790 bash scripts/canary.sh check
 ```
 
-确认 `/` 仍指向原 Collie，`/lite/` 指向 `8790`。不要执行全局 Serve reset、覆写 `/` 或修改 `herdr.collie.plist`。如有自定义 Collie checkout，给 save/check 同时设置 `COLLIE_DIR`。保存基线前就须确认 Collie 干净、二进制存在、根 handler 正确：`save` 记录状态，**并不验证这些前置条件**。
+分别检查 `Web["DNS:443"].Handlers["/"].Proxy` 仍为 `http://127.0.0.1:8787`，以及 `Web["DNS:8443"].Handlers["/"].Proxy` 为 `http://127.0.0.1:8790`。canary 只保护保存的精确 443 key 与 proxy，不验证 8443 映射。443 key 缺失、切换或不可读均拒绝，不能用其他 listener 替代。旧基线缺 key 时须在确认受保护配置后重新 save。不要删除既有 443 `/lite/` handler。不要执行全局 Serve reset、覆写 `/` 或修改 `herdr.collie.plist`。如有自定义 Collie checkout，给 save/check 同时设置 `COLLIE_DIR`。保存基线前就须确认 Collie 干净、二进制存在、根 handler 正确：`save` 记录状态，**并不验证这些前置条件**。
 
-在手机浏览器打开 `https://your-mac.tailxxxx.ts.net/lite/`，进入对话，再刷新深链接。再打开根路径确认旧 UI、旧通知仍正常。缺失/非 trusted 身份应被拒绝；**本地 curl 成功不能代替通过真实 Tailscale 入口的身份验收**。daemon health 仅证明 daemon 活着，不代表 bridge / agent 可用。
+入口为 `https://your-mac.tailxxxx.ts.net:8443/lite/`。先用自有受控浏览器 profile 保留 443 根 SW，复现旧入口后直达新入口。验证 Homeling UI、最终 URL、8443 `/lite/sw.js` controller 与 `/lite/` scope、深链和离线 shell，再回到 443 确认仍为 Collie。不得清除 Collie SW、缓存、订阅或数据。旧 443 主屏图标不会自动迁移。真实设备和通知验收另行安排，不把同机浏览器验证称作 iPhone 验证。缺失/非 trusted 身份应被拒绝；**本地 curl 成功不能代替通过真实 Tailscale 入口的身份验收**。daemon health 仅证明 daemon 活着，不代表 bridge / agent 可用。
+
+显式 origin 只接受匹配 Tailscale hostname 的 HTTPS origin，无 userinfo、query、fragment 或非根 path。根尾斜线和默认 443 会规范化。session transport 要求 loopback peer、可信 login 与精确 authority；写 Origin 必须匹配 canonical origin。一般读取仍沿用既有 Host 策略，不宣称所有 reads 只接受 8443。同主机 cookie 跨端口共享，端口只隔离 origin 与 SW，不隔离 cookie。
+
+验收前单独检查 8443 的 TLS、实际 Host 端口、Serve 身份和路径透传。对 SW、manifest、icons、bundle 核对状态、MIME 与构建内容，health 不得返回 SPA。受控客户端须验证 tailnet 可达性。同机 health 成功不能替代这些证据，不打开 Funnel 或放宽 ACL。
 
 ### 5. 重启与设备验收
 
@@ -147,7 +154,7 @@ PWA 可在手机浏览器添加到主屏；Service Worker 范围应仅为 `/lite
 
 ## 更新与卸载
 
-更新源码应使用你自己的版本控制流程，保留本地修改；此票不执行 push / 合入 / 正式发布。源码路径不变时，按下列流程构建并重启。Bun 安装位置或仓库路径改变时，先带完整身份配置重跑安装脚本。
+更新源码应使用你自己的版本控制流程，保留本地修改；此票不执行 push / 合入 / 正式发布。源码路径不变时，按下列流程构建并重启。Bun 安装位置或仓库路径改变时，先审查并保留既有 plist 全部环境项，定向更新绝对路径，不直接重跑覆盖式 installer。
 
 ```bash
 bash scripts/canary.sh save
@@ -158,11 +165,11 @@ HOMELING_CANARY_DAEMON_URL=http://127.0.0.1:8790 bash scripts/canary.sh check
 
 `build-web.sh` 冻结安装依赖并构建 web，只写本仓库。更新后手动刷新并核对版本；若新 SW 仍处于 waiting，普通刷新未必切换版本，当前需通过浏览器调试入口调用 `window.__homelingApplyUpdate()`，再验证页面更新。排障时可仅清理 `/lite/` 的缓存/SW，不注销 Collie 根 SW。更新前后金丝雀命令使用同一 `HOMELING_CANARY_STATE`。
 
-卸载只删自己的 handler 与 user agent，不动 Collie，也不终止已有 herdr panes：
+回退只撤新增 8443 listener，并恢复 Homeling 原配置和版本。原基线的错误 UI 是已知缺陷，回退不代表恢复可用。卸载只删自己的 listener 与 user agent，不动 Collie，也不终止已有 herdr panes：
 
 ```bash
 bash scripts/canary.sh save
-tailscale serve --https=443 --set-path=/lite/ off
+tailscale serve --https=8443 off
 launchctl bootout "gui/$(id -u)/com.homeling.daemon"
 rm "$HOME/Library/LaunchAgents/com.homeling.daemon.plist"
 bash scripts/canary.sh check
@@ -194,7 +201,7 @@ Vite 当前开发代理直连 bridge，是开发便利入口，**不是 daemon �
 ## Zero-touch 与安全
 
 - 不写 `~/.local/share/collie/`，不改 bridge，不重编译 `bin/collie`；无 patch / rsync 部署路线。安装只写 Homeling plist 与日志目录，构建只写本仓库产物。
-- Tailscale 共享配置仅增删 `/lite/`；根 `/`、旧 UI、旧通知配置保持原样。未来 Homeling push 也须独立于 Collie 通道，不能代用户静音旧通知。
+- Tailscale 共享配置仅增删独立 8443 listener；443 所有 handler、旧 UI、旧通知配置保持原样。历史 ADR 的同 origin 路径假设不用于本部署，不在此改写 ADR。未来 Homeling push 也须独立于 Collie 通道，不能代用户静音旧通知。
 - daemon 仅监听 loopback；远程请求必须有可信登录身份和配置的 Host。直连 loopback 的健康检查允许本机访问，是有意的本地信任边界，不是未鉴权远程入口。
 - 写请求受 Origin / JSON body 门禁和窄路由限制；不要扩大反代到任意 `/api/*`，不要以公网反代或 Funnel 替代 tailnet。
 - `.env` / `.env.*`（示例除外）、日志、产物被忽略；不要提交 provider token、tailnet 密钥、真实 transcript 或 push 私钥。忽略规则不能清除已提交秘密；检查差异与历史，发现泄漏应先轮换凭据再处理历史。

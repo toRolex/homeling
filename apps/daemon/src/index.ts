@@ -46,10 +46,10 @@ function trustedSessionTransport(req: Request & { remoteAddress?: string | null 
   // identity + socket peer constitute this front door; arbitrary forwarded-proto headers do not.
   // Same-UID local processes can forge this tuple and are explicitly outside the lock boundary.
   const host = req.headers.get("host")?.toLowerCase();
-  const expected = cfg.tailscaleHost.toLowerCase();
+  const expected = cfg.publicOrigin.slice("https://".length);
   const login = req.headers.get("tailscale-user-login");
   return !!expected && isLoopbackAddress(req.remoteAddress ?? null) &&
-    (host === expected || host === `${expected}:443`) && !!login && cfg.trustedUsers.includes(login);
+    (host === expected || (!expected.includes(":") && host === `${expected}:443`)) && !!login && cfg.trustedUsers.includes(login);
 }
 function mutationOriginAllowed(req: Request & { remoteAddress?: string | null }, cfg: DaemonConfig): boolean {
   if (!trustedSessionTransport(req, cfg)) return false;
@@ -125,7 +125,7 @@ function hasTailscaleOrigin(req: Request, cfg: DaemonConfig): boolean {
   if (!origin) return false;
   try {
     const parsed = new URL(origin);
-    return parsed.origin === new URL(`https://${cfg.tailscaleHost}`).origin &&
+    return parsed.origin === cfg.publicOrigin &&
       !parsed.username && !parsed.password && parsed.pathname === "/" && !parsed.search && !parsed.hash;
   } catch {
     return false;

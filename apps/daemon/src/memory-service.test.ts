@@ -34,7 +34,7 @@ async function fixture(command: string) {
     async snapshot() { return { workspaces: [{ workspace_id: "w", label: "Mira" }], tabs: [], panes, agents: panes.map(pane => ({ pane_id: pane.pane_id, agent_status: "idle" })) }; },
     subscribe() { return { close() {} }; },
   };
-  const cfg = { port: 8790, hostname: "127.0.0.1", webDist: root, indexHtml: "index.html", trustedUsers: [], tailscaleHost: "test.tail.ts.net", allowAnyHost: false, bridgeOrigin: "http://127.0.0.1:8787", registryPath: join(root, "registry.json"), herdrSocketPath: join(root, "fake.sock"), memoryPath: join(root, "memory") };
+  const cfg = { port: 8790, hostname: "127.0.0.1", webDist: root, indexHtml: "index.html", trustedUsers: [], tailscaleHost: "test.tail.ts.net", publicOrigin: "https://test.tail.ts.net", allowAnyHost: false, bridgeOrigin: "http://127.0.0.1:8787", registryPath: join(root, "registry.json"), herdrSocketPath: join(root, "fake.sock"), memoryPath: join(root, "memory") };
   const memory = new PersonaMemoryStore(cfg.memoryPath);
   const runtime = {
     cfg, herdr, registry: new PersonaRegistry(cfg.registryPath), memory,

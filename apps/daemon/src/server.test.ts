@@ -14,6 +14,7 @@ const CFG = {
   indexHtml: "index.html",
   trustedUsers: ["me@github.com"] as readonly string[],
   tailscaleHost: TAILSCALE_HOST,
+  publicOrigin: `https://${TAILSCALE_HOST}`,
   allowAnyHost: false,
   bridgeOrigin: "http://127.0.0.1:8787",
   registryPath: "/tmp/homeling-test-registry.json",

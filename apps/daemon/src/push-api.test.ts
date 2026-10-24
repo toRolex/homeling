@@ -38,7 +38,7 @@ test('push JSON budget cancels an oversized stream before buffering the remainin
 test('actual HTTP gate rejects every push business write while locked and cross-origin, then accepts an unlocked preference commit', async () => {
   const dir = await mkdtemp(join(await realpath(tmpdir()), 'homeling-push-http-'));
   try {
-    const cfg = { ...daemonConfigFromEnv({}), tailscaleHost: 'home.example', trustedUsers: ['alice'] };
+    const cfg = { ...daemonConfigFromEnv({}), tailscaleHost: 'home.example', publicOrigin: 'https://home.example', trustedUsers: ['alice'] };
     const sessions = new SessionController({ verify: () => secret => secret === 'a'.repeat(43) });
     const store = new PushStore(join(dir, 'push.json')); let sent = 0;
     const push = { store, publicKey: 'public', transport: { send: async () => { sent++; return { status: 'sent' as const }; } } };

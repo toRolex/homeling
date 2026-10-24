@@ -8,7 +8,7 @@ import type { BridgeFetch } from "./bridge-proxy.ts";
 const pane = { paneId: "w1:p1", workspaceId: "w1", tabId: "t1", agent: "claude", cwd: "/work", sessionName: "s1", status: "working" };
 const identity = JSON.stringify(["w1:p1", "w1", "t1", "claude", "/work", "s1", null, null]);
 const screen = "Working on task\n  keep this indentation";
-function config() { return { ...daemonConfigFromEnv({}), registryPath: join(tmpdir(), `homeling-control-fixture-${crypto.randomUUID()}`, 'registry.json'), trustedUsers: ["me"], tailscaleHost: "home.tail.ts.net" }; }
+function config() { return { ...daemonConfigFromEnv({}), registryPath: join(tmpdir(), `homeling-control-fixture-${crypto.randomUUID()}`, 'registry.json'), trustedUsers: ["me"], tailscaleHost: "home.tail.ts.net", publicOrigin: "https://home.tail.ts.net" }; }
 function request(body: unknown = { action: "interrupt", identity, confirmed: true }, path = "/lite/api/pane/w1:p1/control-key", headers: Record<string, string> = {}) {
   const requestHeaders = new Headers({ host: "home.tail.ts.net", origin: "https://home.tail.ts.net", "tailscale-user-login": "me", "content-type": "application/json", ...headers });
   // Explicit remote cases retain the original missing-identity/missing-Origin assertions.

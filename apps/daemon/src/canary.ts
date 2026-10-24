@@ -5,16 +5,13 @@
  */
 
 /** Extract the Proxy target of the `/` handler from `tailscale serve status --json`. */
-export function parseServeStatusRootProxy(json: string): string | null {
+export function parseServeStatusRootProxy(json: string, authority: string): string | null {
   try {
     const parsed: unknown = JSON.parse(json);
     const web = (parsed as { Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }> }).Web;
     if (!web || typeof web !== "object") return null;
-    const roots = Object.values(web).flatMap(listener => {
-      const handler = listener?.Handlers?.["/"];
-      return handler ? [handler.Proxy] : [];
-    });
-    return roots.length === 1 && typeof roots[0] === "string" && roots[0].length > 0 ? roots[0] : null;
+    const proxy = web[authority]?.Handlers?.["/"]?.Proxy;
+    return typeof proxy === "string" && proxy.length > 0 ? proxy : null;
   } catch {
     return null;
   }

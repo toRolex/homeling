@@ -10,6 +10,7 @@
 #   HOMELING_PORT          listen port (default 8790)
 #   HOMELING_TRUSTED_USERS comma-separated tailscale logins
 #   HOMELING_TAILSCALE_HOST this node's tailscale DNS name
+#   HOMELING_PUBLIC_ORIGIN canonical HTTPS origin for sessions and writes
 set -euo pipefail
 
 REPO="${HOMELING_REPO:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -27,6 +28,7 @@ add_env() { ENV_DICT="$ENV_DICT    <key>$1</key><string>$2</string>"$'\n'; }
 add_env HOMELING_PORT "${HOMELING_PORT:-8790}"
 [ -n "${HOMELING_TRUSTED_USERS:-}" ] && add_env HOMELING_TRUSTED_USERS "$HOMELING_TRUSTED_USERS"
 [ -n "${HOMELING_TAILSCALE_HOST:-}" ] && add_env HOMELING_TAILSCALE_HOST "$HOMELING_TAILSCALE_HOST"
+[ -n "${HOMELING_PUBLIC_ORIGIN:-}" ] && add_env HOMELING_PUBLIC_ORIGIN "$HOMELING_PUBLIC_ORIGIN"
 
 mkdir -p "$LOG_DIR" "$(dirname "$PLIST")"
 

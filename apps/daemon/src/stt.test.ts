@@ -6,7 +6,7 @@ const host = "homeling.tail.test";
 const cfg: DaemonConfig = {
   port: 8790, hostname: "127.0.0.1", webDist: "/unused", indexHtml: "index.html",
   registryPath: "/unused/personas.json", herdrSocketPath: "/unused/herdr.sock",
-  trustedUsers: ["me@test"], tailscaleHost: host, allowAnyHost: false, bridgeOrigin: "http://127.0.0.1:8787",
+  trustedUsers: ["me@test"], tailscaleHost: host, publicOrigin: `https://${host}`, allowAnyHost: false, bridgeOrigin: "http://127.0.0.1:8787",
 };
 function request(path = "/lite/api/stt", options: RequestInit = {}) {
   return Object.assign(new Request(`https://${host}${path}`, {

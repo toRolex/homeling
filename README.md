@@ -92,6 +92,7 @@ bun run dev:web
 安装与构建：
 
 ```bash
+export HOMELING_PUBLIC_ORIGIN="https://${HOMELING_TAILSCALE_HOST}:8443"
 bash scripts/install-launchd.sh
 bash scripts/build-web.sh
 ```
@@ -99,15 +100,16 @@ bash scripts/build-web.sh
 检查安装不变量：
 
 ```bash
+export HOMELING_CANARY_SERVE_AUTHORITY="${HOMELING_TAILSCALE_HOST}:443"
 bash scripts/canary.sh save
 bash scripts/canary.sh check
 ```
 
-仅添加或移除 Homeling 的路径，保留现有根 handler：
+新安装仅添加或移除 Homeling 的独立 8443 listener，保留 443 的所有 handler。已有生产 plist 不得直接重跑覆盖式 installer，先按部署文档定向保留配置。
 
 ```bash
-tailscale serve --bg --https=443 --set-path=/lite/ 8790
-tailscale serve --https=443 --set-path=/lite/ off
+tailscale serve --bg --https=8443 http://127.0.0.1:8790
+tailscale serve --https=8443 off
 ```
 
 </details>
@@ -119,14 +121,14 @@ tailscale serve --https=443 --set-path=/lite/ off
 ```text
 手机浏览器
   │ Tailscale HTTPS
-  ├─ /       → 现有 Collie bridge :8787
-  └─ /lite/  → Homeling daemon :8790
+  ├─ HTTPS :443 /        → 现有 Collie bridge :8787
+  └─ HTTPS :8443 /lite/  → Homeling daemon :8790
                  ├─ React 前端
                  ├─ registry / memory / Activity / push
                  └─ legacy bridge → Herdr agent panes
 ```
 
-Homeling 独立安装，保留现有 Collie。daemon 只监听 loopback，通过 Tailscale 身份与 Host / Origin 检查控制远程访问。对话内容会发送给所选模型 provider。
+Homeling 入口为 `https://your-mac.tailxxxx.ts.net:8443/lite/`。8443 的 `/` 代理到 daemon，完整保留 `/lite/` 请求路径，不在 Serve 中挂载 `/lite/`。443 根 SW 不控制新 origin，旧主屏图标不会自动迁移。Homeling 独立安装，保留现有 Collie。daemon 只监听 loopback，通过 Tailscale 身份与 Host / Origin 检查控制远程访问。对话内容会发送给所选模型 provider。
 
 ## 文档与贡献
 

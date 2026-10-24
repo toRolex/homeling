@@ -18,6 +18,9 @@ test("production session credentials require the fixed trusted HTTPS terminator,
   const terminatedHttps = await handleRequest(make("127.0.0.1"), cfg, undefined, undefined, session);
   expect(terminatedHttps.status).toBe(200);
   expect(terminatedHttps.headers.get("set-cookie")).toContain("Secure");
+  expect((await handleRequest(make("127.0.0.1", "home.ts.net:443", "https://home.ts.net:443"), cfg, undefined, undefined, session)).status).toBe(200);
+  const localOnly = daemonConfigFromEnv({ HOMELING_TAILSCALE_HOST: "", HOMELING_PUBLIC_ORIGIN: "", HOMELING_TRUSTED_USERS: "alice" });
+  expect((await handleRequest(make("127.0.0.1"), localOnly, undefined, undefined, session)).status).toBe(403);
 });
 
 test("8443 front door unlocks and admits writes only with exact transport and origin", async () => {
@@ -26,7 +29,10 @@ test("8443 front door unlocks and admits writes only with exact transport and or
   const session = new SessionController({ verify: () => (input) => input === secret });
   const make = (path: string, method = "POST", overrides: Record<string, string | null> = {}, remoteAddress = "127.0.0.1", body: unknown = {}) => {
     const headers = new Headers({ host: "home.ts.net:8443", origin: "https://home.ts.net:8443", "tailscale-user-login": "alice", "content-type": "application/json" });
-    for (const [key, value] of Object.entries(overrides)) value === null ? headers.delete(key) : headers.set(key, value);
+    for (const [key, value] of Object.entries(overrides)) {
+      if (value === null) headers.delete(key);
+      else headers.set(key, value);
+    }
     return Object.assign(new Request(`http://127.0.0.1:8790${path}`, { method, headers, ...(method === "GET" ? {} : { body: JSON.stringify(body) }) }), { remoteAddress });
   };
   const call = (req: ReturnType<typeof make>) => handleRequest(req, cfg, async () => Response.json({ ok: true }), undefined, session);
