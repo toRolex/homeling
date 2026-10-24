@@ -86,11 +86,14 @@ function readBridgeOrigin(value: string | undefined): string {
 }
 
 function readPublicOrigin(value: string | undefined, tailscaleHost: string): string {
-  const raw = value?.trim();
-  if (!raw && !tailscaleHost) return "";
+  const raw = value || (tailscaleHost ? `https://${tailscaleHost}` : "");
+  if (!raw) return "";
   let url: URL;
   try {
-    url = new URL(raw || `https://${tailscaleHost}`);
+    if (!/^https:\/\/[^/?#@\\\s\u0000-\u001f\u007f]+(?<!:)\/?(?![\s\S])/i.test(raw)) {
+      throw new Error("Invalid origin syntax");
+    }
+    url = new URL(raw);
   } catch {
     throw new Error("HOMELING_PUBLIC_ORIGIN must be an HTTPS origin matching HOMELING_TAILSCALE_HOST");
   }
