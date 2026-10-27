@@ -53,6 +53,21 @@ test("locked UI masks but retains the mounted application and draft instead of r
   expect(markup).not.toContain("localStorage");
 });
 
+test("local mode cold reload retains manual unlock when the server cookie is already valid", async () => {
+  let writes = 0;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST") writes++;
+    return Response.json({ mode: "local-unlock", locked: false, available: true, epoch: 1, generation: "local-boot", serverNow: Date.now(), idleDeadline: Date.now() + 60_000, absoluteDeadline: Date.now() + 600_000 });
+  }) as unknown as typeof fetch;
+  sessionState.apply({ locked: true });
+  await mount();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(sessionState.get()).toMatchObject({ mode: "local-unlock", locked: true, lockConfirmed: false, ready: false });
+  expect(container.querySelector('input[type="password"]')).not.toBeNull();
+  expect(container.textContent).toContain("unlock-secret");
+  expect(writes).toBe(0);
+});
+
 test("identity mode establishes once, confirms the browser cookie, catches up before ready, and hides password controls", async () => {
   let established = false;
   let posts = 0;

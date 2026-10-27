@@ -130,7 +130,11 @@ export function SessionBoundary({ children }: { children: ReactNode }) {
       let next = await sessionRequest(action, secret);
       if (request !== sequence.current || fence !== sessionState.version()) return;
       if (next.generation !== sessionState.get().generation) identityEstablishAttempted.current = false;
-      if (sessionState.get().locked && !next.locked && action !== "unlock" && !(next.mode === "tailscale-identity" && (action === "establish" || action === undefined))) return;
+      if (sessionState.get().locked && !next.locked && action !== "unlock" && !(next.mode === "tailscale-identity" && (action === "establish" || action === undefined))) {
+        sessionState.apply({ ...next, locked: true });
+        sessionState.lock();
+        return;
+      }
       sessionState.apply(next);
       fence = sessionState.version();
       if (next.locked && next.mode === "tailscale-identity" && action !== "establish" && action !== "unlock" && !identityEstablishAttempted.current) {
