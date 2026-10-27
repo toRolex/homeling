@@ -143,16 +143,16 @@ Homeling 独立安装，保留现有 Collie。daemon 只监听 loopback，通过
 
 ## 人机协作方法与代码位置
 
-本部分属于**中山大学高级人工智能课程项目 Homeling**。第三章提出的算法融入现有 daemon、Activity 任务记录、请求接口和移动端卡片，代码按框架职责组织。
+协作计划接入现有 daemon、Activity 任务记录、请求接口和移动端卡片。下表列出方法与代码位置。
 
 | 方法部分 | 框架中的实现位置 | 实际用途 |
 | --- | --- | --- |
-| 3.1 总体框架 | [task-plan.ts](apps/daemon/src/task-plan.ts)、[activity-ledger.ts](apps/daemon/src/activity-ledger.ts) | 阶段 DAG、依赖校验和影响传播；协作计划与任务运行实例一起持久化，复用 Activity 的串行提交与原子写入 |
-| 3.2 等待成本 | [clarification-value.ts](apps/daemon/src/clarification-value.ts)、[task-cooperation.ts](apps/daemon/src/task-cooperation.ts) | 计算最小预期损失、回答信息价值及有效停顿成本；根据当前可执行序列估计 W，再更新问题分数 |
-| 3.3 介入请求 / 算法1 | [task-cooperation.ts](apps/daemon/src/task-cooperation.ts)、[task-cooperation-routes.ts](apps/daemon/src/task-cooperation-routes.ts)、[index.ts](apps/daemon/src/index.ts) | 问题去重与可回答性检查、预算控制、必需信息兜底；将澄清/审批合并到已有请求列表，并通过现有 pane reply 通道派发独立阶段 |
+| 总体框架 | [task-plan.ts](apps/daemon/src/task-plan.ts)、[activity-ledger.ts](apps/daemon/src/activity-ledger.ts) | 阶段 DAG、依赖校验和影响传播；协作计划与任务运行实例一起持久化，复用 Activity 的串行提交与原子写入 |
+| 等待成本 | [clarification-value.ts](apps/daemon/src/clarification-value.ts)、[task-cooperation.ts](apps/daemon/src/task-cooperation.ts) | 计算最小预期损失、回答信息价值及有效停顿成本；根据当前可执行序列估计 W，再更新问题分数 |
+| 介入请求 | [task-cooperation.ts](apps/daemon/src/task-cooperation.ts)、[task-cooperation-routes.ts](apps/daemon/src/task-cooperation-routes.ts)、[index.ts](apps/daemon/src/index.ts) | 问题去重与可回答性检查、预算控制、必需信息兜底；将澄清/审批合并到已有请求列表，并通过现有 pane reply 通道派发独立阶段 |
 | 移动端请求展示 | [PendingRequestCard.tsx](apps/web/src/PendingRequestCard.tsx)、[ConversationPage.tsx](apps/web/src/ConversationPage.tsx)、[requests.ts](packages/contracts/src/requests.ts) | 复用请求卡片展示进展、选项后果与审批范围，支持澄清自由文本和折叠详情 |
-| 3.4 反馈与恢复 | [task-feedback.ts](apps/daemon/src/task-feedback.ts)、[task-cooperation.ts](apps/daemon/src/task-cooperation.ts)、[requests.ts](apps/daemon/src/requests.ts) | 校验任务/请求标识与相关要求版本；审批绑定具体操作；纠错使受影响步骤、许可及旧检查失效；未知结果先核查再恢复 |
-| 3.5 完成判定 | [task-validation.ts](apps/daemon/src/task-validation.ts)、[activity-ledger.ts](apps/daemon/src/activity-ledger.ts) | 检查绑定要求版本、证据位置和产物版本；阶段检查通过后才能推进；协作任务需必需项目全部通过，且观察到 agent 完成，才登记 `task.completed` |
+| 反馈与恢复 | [task-feedback.ts](apps/daemon/src/task-feedback.ts)、[task-cooperation.ts](apps/daemon/src/task-cooperation.ts)、[requests.ts](apps/daemon/src/requests.ts) | 校验任务/请求标识与相关要求版本；审批绑定具体操作；纠错使受影响步骤、许可及旧检查失效；未知结果先核查再恢复 |
+| 完成判定 | [task-validation.ts](apps/daemon/src/task-validation.ts)、[activity-ledger.ts](apps/daemon/src/activity-ledger.ts) | 检查绑定要求版本、证据位置和产物版本；阶段检查通过后才能推进；协作任务需必需项目全部通过，且观察到 agent 完成，才登记 `task.completed` |
 
 ### 任务流程
 
@@ -183,7 +183,7 @@ PATCH 请求携带读取到的 `revision`，支持以下操作：
 - `check`：提交 `checkId`、`status`（`passed` / `failed` / `unknown`）、`evidenceLocation`；未知状态同时注明 `missingEvidence`。
 - `correction`：通过 `changes` 提交要求 ID 到新内容的映射，传播重做范围并撤销旧请求。
 - `revise-operation`：提交 `questionId`、新的 `operation` 和受影响步骤的 `instructions`，重新生成审批，旧许可不再沿用。
-- `reconcile`：提交 `stepId`、`evidence`（`completed` / `not-executed` / `insufficient`）和 `evidenceLocation`；证据不足时保持待核查。
+- `reconcile`：提交 `stepId`、`evidence`（`completed` / `not-executed` / `insufficient`）和 `evidenceLocation`；`completed` 另须提交核查确认的 `artifactVersion`，供后续版本化检查使用，不会重发该步骤；证据不足时保持待核查。
 - `retry-step`：提交验收失败的 `stepId`，使其与下游步骤重新准备并撤销旧授权。
 - `authorize`：显式更新普通阶段的 `stepId`、`authorized`；有待决审批的阶段必须通过对应审批请求。
 

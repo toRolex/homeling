@@ -18,6 +18,3 @@ unlock-verifier.json
 vapid.json
 push.json
 push.json.*.tmp
-
-# Local coding-assistant notes and conversation-derived context.
-/.agents/

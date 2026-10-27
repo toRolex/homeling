@@ -79,12 +79,16 @@ export function applyCorrection(
 }
 export function reconcileUnknown(
   task: TaskRecord, stepId: string, evidence: 'completed' | 'not-executed' | 'insufficient',
-  evidenceLocation: string,
+  evidenceLocation: string, artifactVersion?: string,
 ): void {
   const step = task.steps.find(item => item.id === stepId);
   if (!step || step.status !== 'unknown') throw new Error('步骤不处于待核查状态');
   if (!evidenceLocation.trim()) throw new Error('必须提供核查证据位置');
-  if (evidence === 'completed') step.status = 'done';
+  if (evidence === 'completed') {
+    if (!artifactVersion?.trim()) throw new Error('必须提供已核查的产物版本');
+    step.artifactVersion = artifactVersion;
+    step.status = 'done';
+  }
   if (evidence === 'not-executed') step.status = 'pending';
-  task.events.push({ kind: 'execution.reconciled', detail: JSON.stringify({ stepId, evidence, evidenceLocation }) });
+  task.events.push({ kind: 'execution.reconciled', detail: JSON.stringify({ stepId, evidence, evidenceLocation, artifactVersion }) });
 }

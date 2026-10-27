@@ -297,9 +297,12 @@ export function updateCooperation(state: CooperationState, value: unknown): void
     state.checks.push(recordCheck(state.task, item, { status: value.status as CheckRecord['status'],
       evidenceLocation: value.evidenceLocation, missingEvidence: value.missingEvidence as string | undefined }));
   } else if (value.kind === 'reconcile') {
-    requireValue(text(value.stepId) && text(value.evidenceLocation) &&
+    const step = state.task.steps.find(s => s.id === value.stepId);
+    requireValue(step?.status === 'unknown' && text(value.evidenceLocation) && value.evidenceLocation.trim() &&
       ['completed', 'not-executed', 'insufficient'].includes(String(value.evidence)), '无效核查报告');
-    reconcileUnknown(state.task, value.stepId, value.evidence as 'completed' | 'not-executed' | 'insufficient', value.evidenceLocation);
+    requireValue(value.evidence !== 'completed' || text(value.artifactVersion) && value.artifactVersion.trim(), '需提供已核查的产物版本');
+    reconcileUnknown(state.task, step.id, value.evidence as 'completed' | 'not-executed' | 'insufficient',
+      value.evidenceLocation, value.evidence === 'completed' ? value.artifactVersion as string : undefined);
   } else if (value.kind === 'retry-step') {
     const step = state.task.steps.find(s => s.id === value.stepId);
     requireValue(step && step.status === 'done' && state.checkItems.some(item => item.stepId === step.id &&
