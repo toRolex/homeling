@@ -220,11 +220,11 @@ export interface ApprovalResponse {
   readonly outcome: "submitted" | "unknown" | "already-handled" | "stale" | "not-submitted";
 }
 
-export async function approvePendingRequest(requestId: string, optionId: string, occurrenceKey?: string): Promise<ApprovalResponse> {
+export async function approvePendingRequest(requestId: string, optionId: string, occurrenceKey?: string, freeText?: string): Promise<ApprovalResponse> {
   const response = await sessionMutationFetch(`${API_PREFIX}requests/${encodeURIComponent(requestId)}/approve`, {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ optionId, ...(occurrenceKey === undefined ? {} : { occurrenceKey }) }),
+    body: JSON.stringify({ optionId, ...(occurrenceKey === undefined ? {} : { occurrenceKey }), ...(freeText === undefined ? {} : { freeText }) }),
   });
   let result: (ApprovalResponse & { deliveryUnknown?: boolean }) | null = null;
   try {

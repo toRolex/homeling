@@ -9,6 +9,10 @@ export interface RequestOption {
 export interface PromptSelectPayload {
   readonly question: string;
   readonly subject?: readonly string[];
+  readonly collaboration?: {
+    readonly freeText: boolean;
+    readonly details: readonly string[];
+  };
   readonly options: readonly RequestOption[];
 }
 

@@ -480,7 +480,7 @@ function PaneConversation({ paneId, personaId, persona, draft, setDraft, persona
                   <PendingRequestCard
                     key={request.id}
                     request={request}
-                    onApprove={(id, option) => approvePendingRequest(id, option, occurrenceKey ?? request.taskOccurrenceKey)}
+                    onApprove={(id, option, freeText) => approvePendingRequest(id, option, occurrenceKey ?? request.taskOccurrenceKey, freeText)}
                     onSettled={keepSettledRequest}
                   />
                 ))}

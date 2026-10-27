@@ -9,6 +9,8 @@ export const messages = {
   "locale.language": ["Language", "Sprache", "Idioma", "언어", "言語", "语言"],
   "locale.notSaved": ["The language choice cannot be saved in this browser. It applies only to this page.", "Die Sprachauswahl kann in diesem Browser nicht gespeichert werden. Sie gilt nur für diese Seite.", "No se puede guardar el idioma en este navegador. Solo se aplica a esta página.", "이 브라우저에 언어 선택을 저장할 수 없습니다. 이 페이지에만 적용됩니다.", "このブラウザーでは言語設定を保存できません。このページでのみ適用されます。", "此浏览器无法保存语言选择，仅在当前页面生效。"],
   "common.loading": ["Loading…", "Wird geladen…", "Cargando…", "불러오는 중…", "読み込み中…", "加载中…"],
+  "permission.collaborationDetails": ["Details", "Details", "Detalles", "세부 정보", "詳細", "详细信息"],
+  "permission.collaborationAnswer": ["Additional requirements", "Weitere Anforderungen", "Requisitos adicionales", "추가 요구 사항", "追加の要件", "补充要求"],
   "common.send": ["Send", "Senden", "Enviar", "보내기", "送信", "发送"],
   "common.stop": ["Stop", "Stoppen", "Detener", "중지", "停止", "停止"],
   "common.cancel": ["Cancel", "Abbrechen", "Cancelar", "취소", "キャンセル", "取消"],

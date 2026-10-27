@@ -6,7 +6,7 @@ import { createSingleFlightApproval } from "./approval-guard.ts";
 
 export interface PendingRequestCardProps {
   request: PendingRequest;
-  onApprove: (requestId: string, optionId: string) => Promise<ApprovalResponse>;
+  onApprove: (requestId: string, optionId: string, freeText?: string) => Promise<ApprovalResponse>;
   onSettled?: (request: PendingRequest) => void;
 }
 
@@ -18,12 +18,15 @@ function statusLabel(t: Translate, status: PendingRequestStatus, unknown = false
 
 export function PendingRequestCard({ request, onApprove, onSettled }: PendingRequestCardProps): ReactElement {
   const { t } = useLocale();
+  const [freeText, setFreeText] = useState("");
+  const freeTextRef = useRef("");
+  const collaboration = request.kind === "prompt-select" ? request.payload.collaboration : undefined;
   const [status, setStatus] = useState<PendingRequestStatus>(request.status);
   const [busyOption, setBusyOption] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const submit = useRef<((optionId: string) => Promise<ApprovalResponse | null>) | null>(null);
-  if (!submit.current) submit.current = createSingleFlightApproval((optionId) => onApprove(request.id, optionId));
+  if (!submit.current) submit.current = createSingleFlightApproval((optionId) => onApprove(request.id, optionId, optionId === "__free_text__" ? freeTextRef.current : undefined));
   const visibleStatus = request.status === "pending" ? status : request.status;
   const disabled = visibleStatus !== "pending" || busyOption !== null;
 
@@ -84,6 +87,17 @@ export function PendingRequestCard({ request, onApprove, onSettled }: PendingReq
           {request.payload.preview.join("\n")}
         </pre>
       ) : null}
+      {collaboration?.details.length ? <details className="mb-3 text-xs">
+        <summary className="cursor-pointer">{t("permission.collaborationDetails")}</summary>
+        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{collaboration.details.join("\n")}</pre>
+      </details> : null}
+      {collaboration?.freeText ? <div className="mb-3 flex gap-2">
+        <textarea value={freeText} disabled={disabled} maxLength={10000}
+          aria-label={t("permission.collaborationAnswer")} className="min-w-0 flex-1 rounded-lg bg-black/20 p-2 text-sm"
+          onChange={event => { setFreeText(event.target.value); freeTextRef.current = event.target.value; }} />
+        <button type="button" disabled={disabled || !freeText.trim()} onClick={() => void choose("__free_text__")}
+          className="rounded-lg border border-amber-700 px-3 disabled:opacity-50">{t("common.send")}</button>
+      </div> : null}
       <div className="flex flex-col gap-2">
         {request.payload.options.map((option) => (
           <button

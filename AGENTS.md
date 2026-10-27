@@ -18,4 +18,4 @@ Issue 与 spec 存放在 GitHub Issues，通过 `gh` CLI 读写。详见 `docs/a
 
 ### Implementation notes
 
-实现决策与因果记录存放在 `.agents/notes/`，记录决策、取舍与偏离，供下一次尝试学习。
+实现决策与因果记录可保存在本地 `.agents/notes/`。该目录已被 Git 忽略，不提交实现笔记、用户需求摘要或对话上下文。
