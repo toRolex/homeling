@@ -18,7 +18,7 @@ import type { PersonaRuntime } from "../../daemon/src/persona-service.ts";
 import { SessionLock } from "../../daemon/src/session-lock.ts";
 import { createDaemonSystemAdmissions } from "../../daemon/src/system-admission.ts";
 
-const window = new Window();
+const window = new Window({ url: "https://homeling.test/lite/" });
 const saved = new Map<string, PropertyDescriptor | undefined>();
 const originalFetch = globalThis.fetch;
 let root: Root;
@@ -220,8 +220,8 @@ test("production AppRoot really suspends triage on server lock and until read-on
   let finishSnapshot!: (response: Response) => void;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
     const path = String(url);
-    if (path.endsWith("/session")) return Response.json({ locked: true, epoch: 1, available: true });
-    if (path.endsWith("/session/unlock")) return Response.json({ locked: false, epoch: 2, generation: "boot" });
+    if (path.endsWith("/session")) return Response.json({ mode: "local-unlock", locked: true, generation: "boot", serverNow: Date.now(), available: true });
+    if (path.endsWith("/session/unlock")) return Response.json({ mode: "local-unlock", locked: false, available: true, epoch: 2, generation: "boot", serverNow: Date.now(), idleDeadline: Date.now() + 60_000, absoluteDeadline: Date.now() + 600_000 });
     if (path.endsWith("persona/list")) return Response.json({ personas: [mira] });
     if (path.endsWith("requests")) { pendingReads++; expect(init?.method ?? "GET").toBe("GET"); return Response.json([request("needs-you", "mira")]); }
     if (path.endsWith("snapshot")) return new Promise<Response>((resolve) => { finishSnapshot = resolve; });
@@ -230,6 +230,7 @@ test("production AppRoot really suspends triage on server lock and until read-on
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => root.render(<MemoryRouter><AppRoot slots={{ homeSummary: <SessionAwareHomeTriage /> }} /></MemoryRouter>));
   expect(pendingReads).toBe(0);
+  await settleUntil(() => container.querySelector('input[type="password"]') !== null);
   const input = container.querySelector('input[type="password"]')! as HTMLInputElement;
   input.value = "x".repeat(43);
   await act(async () => container.querySelector("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }) as unknown as Event));

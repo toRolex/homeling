@@ -1,4 +1,7 @@
+export type SessionMode = "local-unlock" | "tailscale-identity";
+
 export interface SessionSnapshot {
+  readonly mode?: SessionMode;
   readonly locked: boolean;
   /** Local fail-closed masking is not proof that the server accepted a lock. */
   readonly lockConfirmed?: boolean;
@@ -22,7 +25,7 @@ export class SessionStateStore {
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private emit(): void { for (const listener of this.listeners) listener(); }
   apply(next: SessionSnapshot): void {
-    const changed = next.epoch !== this.snapshot.epoch || next.generation !== this.snapshot.generation || next.locked !== this.snapshot.locked;
+    const changed = next.epoch !== this.snapshot.epoch || next.generation !== this.snapshot.generation || next.locked !== this.snapshot.locked || next.mode !== this.snapshot.mode;
     if (changed) this.revision++;
     this.snapshot = { ...next, lockConfirmed: next.locked, ready: !next.locked && !changed && this.snapshot.ready === true };
     this.emit();

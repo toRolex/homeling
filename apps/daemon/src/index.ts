@@ -34,14 +34,18 @@ const sessionControllers = new WeakMap<DaemonConfig, SessionController>();
 function sessionController(cfg: DaemonConfig): SessionController {
   let controller = sessionControllers.get(cfg);
   if (!controller) {
-    controller = new SessionController({ devHttp: cfg.sessionDevHttp, verify: () => cfg.unlockDataDir ? loadUnlockVerifier(cfg.unlockDataDir) : null });
+    controller = new SessionController({ mode: cfg.sessionMode ?? "local-unlock", devHttp: cfg.sessionDevHttp, verify: () => cfg.unlockDataDir ? loadUnlockVerifier(cfg.unlockDataDir) : null });
     sessionControllers.set(cfg, controller);
   }
   return controller;
 }
 function trustedSessionTransport(req: Request & { remoteAddress?: string | null }, cfg: DaemonConfig): boolean {
-  if (cfg.sessionDevHttp) return isLoopbackRequest(req) && !req.headers.has("tailscale-user-login") &&
-    req.headers.get("host") === `localhost:${cfg.port}` && new URL(req.url).origin === `http://localhost:${cfg.port}`;
+  if (cfg.sessionDevHttp) {
+    try {
+      return isLoopbackRequest(req) && !req.headers.has("tailscale-user-login") &&
+        req.headers.get("host") === `localhost:${cfg.port}` && new URL(req.url).origin === `http://localhost:${cfg.port}`;
+    } catch { return false; }
+  }
   // Serve terminates HTTPS before the loopback HTTP hop. Only its fixed Host + trusted injected
   // identity + socket peer constitute this front door; arbitrary forwarded-proto headers do not.
   // Same-UID local processes can forge this tuple and are explicitly outside the lock boundary.
@@ -54,6 +58,14 @@ function trustedSessionTransport(req: Request & { remoteAddress?: string | null 
 function mutationOriginAllowed(req: Request & { remoteAddress?: string | null }, cfg: DaemonConfig): boolean {
   if (!trustedSessionTransport(req, cfg)) return false;
   return cfg.sessionDevHttp ? req.headers.get("origin") === `http://localhost:${cfg.port}` : hasTailscaleOrigin(req, cfg);
+}
+function validIdentityConfig(cfg: DaemonConfig): boolean {
+  if (cfg.hostname !== "127.0.0.1" || cfg.allowAnyHost || cfg.sessionDevHttp || !cfg.trustedUsers.length || !cfg.tailscaleHost) return false;
+  try {
+    const origin = new URL(cfg.publicOrigin);
+    return origin.protocol === "https:" && origin.hostname === cfg.tailscaleHost.toLowerCase() &&
+      !origin.username && !origin.password && origin.pathname === "/" && !origin.search && !origin.hash && origin.origin === cfg.publicOrigin;
+  } catch { return false; }
 }
 
 export const API_HEALTH_PATH = "/lite/api/health";
@@ -148,9 +160,16 @@ export async function handleRequest(
     });
   }
 
-  const { pathname } = new URL(req.url);
+  let pathname: string;
+  try { pathname = new URL(req.url).pathname; } catch { return Response.json({ code: "request.invalid_url" }, { status: 400 }); }
   const isMutation = req.method !== "GET" && req.method !== "HEAD";
-  if (pathname === "/lite/api/session" && !trustedSessionTransport(req, cfg)) return new Response("trusted HTTPS session front door required\n", { status: 403 });
+  const identityMode = (cfg.sessionMode ?? "local-unlock") === "tailscale-identity";
+  if (identityMode && !validIdentityConfig(cfg)) return Response.json({ code: "session.configuration_invalid" }, { status: 503, headers: { "cache-control": "no-store" } });
+  if (pathname === "/lite/api/session" && !trustedSessionTransport(req, cfg)) return Response.json({ code: "session.identity_required" }, { status: 403, headers: { "cache-control": "no-store" } });
+  const publicHealthRead = pathname === API_HEALTH_PATH && (req.method === "GET" || req.method === "HEAD");
+  if (identityMode && (pathname.startsWith("/lite/api/") && !publicHealthRead) && !trustedSessionTransport(req, cfg)) {
+    return Response.json({ code: "session.identity_required" }, { status: 403, headers: { "cache-control": "no-store" } });
+  }
   if (isMutation && !mutationOriginAllowed(req, cfg)) {
     return new Response("cross-origin rejected\n", { status: 403 });
   }
@@ -191,8 +210,8 @@ export async function handleRequest(
     });
   }
 
-  if (pathname === API_HEALTH_PATH || pathname === "/api/health") {
-    return Response.json({ ok: true, service: "homeling-daemon" });
+  if ((pathname === API_HEALTH_PATH || (!identityMode && pathname === "/api/health")) && (req.method === "GET" || req.method === "HEAD")) {
+    return req.method === "HEAD" ? new Response(null, { headers: { "content-type": "application/json" } }) : Response.json({ ok: true, service: "homeling-daemon" });
   }
 
   const runtime = runtimeOverride ?? personaRuntime(cfg, upstreamFetch);
@@ -249,7 +268,7 @@ export async function handleRequest(
       const task = await runtime.activity.task(key);
       if (!task) return Response.json({ error: "task occurrence not found" }, { status: 404 });
       return Response.json(task, { headers: { "cache-control": "no-store" } });
-    } catch (error) {
+    } catch {
       return Response.json({ error: "Activity unavailable" }, { status: 502 });
     }
   }

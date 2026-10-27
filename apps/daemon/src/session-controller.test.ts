@@ -60,6 +60,61 @@ test("a cancelled unlock body cannot consume a credential verification or mint a
   expect(response.status).toBe(400); expect(verified).toBe(0); expect(response.headers.get("set-cookie")).toBeNull();
 });
 
+test("identity establish is secret-free, rate-limited, lease-idempotent, and never calls the local verifier", async () => {
+  let verified = 0;
+  const controller = new SessionController({ mode: "tailscale-identity", verify: () => { verified++; throw new Error("identity mode must not load local credentials"); } });
+  const metadata = await controller.handle(req(""), "alice");
+  expect(metadata?.headers.get("set-cookie")).toBeNull();
+  expect(await metadata?.json()).toMatchObject({ mode: "tailscale-identity", locked: true, available: true });
+  const denied = await controller.handle(req("/unlock", JSON.stringify({ secret })), "alice");
+  expect(denied?.status).toBe(404);
+  expect(denied?.headers.get("set-cookie")).toBeNull();
+  const malformed = await controller.handle(req("/establish", JSON.stringify({ secret })), "alice");
+  expect(malformed?.status).toBe(400);
+  expect(malformed?.headers.get("set-cookie")).toBeNull();
+  const established = await controller.handle(req("/establish", "{}"), "alice");
+  expect(established?.status).toBe(200);
+  const cookie = established!.headers.get("set-cookie")!;
+  expect(cookie).toContain("__Secure-homeling_session=");
+  for (const flag of ["Path=/lite/", "HttpOnly", "SameSite=Strict", "Secure", "Max-Age=28800"]) expect(cookie).toContain(flag);
+  const firstState = await established!.json() as { epoch: number; generation: string };
+  const currentCookie = cookie.split(";", 1)[0]!;
+  const idempotent = await controller.handle(req("/establish", "{}", currentCookie, firstState.generation), "alice");
+  expect(idempotent?.status).toBe(200);
+  expect(idempotent?.headers.get("set-cookie")).toBeNull();
+  expect(await idempotent?.json()).toMatchObject({ locked: false, epoch: firstState.epoch, generation: firstState.generation });
+  const admissionRequest = req("", undefined, currentCookie, firstState.generation);
+  admissionRequest.headers.set("x-homeling-session-epoch", String(firstState.epoch));
+  expect(() => controller.admission(admissionRequest, "alice").assert()).not.toThrow();
+  expect(() => controller.admission(admissionRequest, "mallory")).toThrow("session.locked");
+  expect(verified).toBe(0);
+});
+
+test("identity establish rejects invalid bodies, throttles new leases, and keeps dispatch revocable", async () => {
+  const controller = new SessionController({ mode: "tailscale-identity", verify: () => { throw new Error("must not verify"); } });
+  for (const body of ["null", "[]", "", "{broken", JSON.stringify({ padding: "x".repeat(1_100) })]) {
+    const response = (await controller.handle(req("/establish", body), "alice"))!;
+    expect(response.status).toBe(400);
+    expect(response.headers.get("set-cookie")).toBeNull();
+  }
+  const local = new SessionController({ verify: () => null });
+  expect((await local.handle(req("/establish", "{}"), "alice"))!.status).toBe(404);
+  const established = (await controller.handle(req("/establish", "{}"), "alice"))!;
+  const cookie = established.headers.get("set-cookie")!.split(";", 1)[0]!;
+  const state = await established.json() as { epoch: number };
+  const admittedRequest = req("", undefined, cookie, controller.generation);
+  admittedRequest.headers.set("x-homeling-session-epoch", String(state.epoch));
+  const admission = controller.admission(admittedRequest, "alice");
+  const activity = (await controller.handle(req("/activity", "{}", cookie, controller.generation), "alice"))!;
+  expect(await activity.json()).toMatchObject({ mode: "tailscale-identity", available: true, locked: false });
+  await controller.handle(req("/lock", "{}", cookie), "alice");
+  let effects = 0;
+  expect(() => admission.dispatch(() => effects++)).toThrow("session.locked");
+  expect(effects).toBe(0);
+  for (let i = 0; i < 4; i++) expect((await controller.handle(req("/establish", "{}"), "alice"))!.status).toBe(200);
+  expect((await controller.handle(req("/establish", "{}"), "alice"))!.status).toBe(429);
+});
+
 test("unlock alone mints a strict HTTPS cookie; polls and activity never resurrect a locked session", async () => {
   const controller = new SessionController({ verify: () => (input) => input === secret });
   expect((await controller.handle(req(""), "alice"))!.status).toBe(200);

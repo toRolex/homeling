@@ -28,6 +28,7 @@ describe("daemonConfigFromEnv", () => {
       expect(c.trustedUsers).toEqual([]);
       expect(c.tailscaleHost).toBe("");
       expect(c.allowAnyHost).toBe(false);
+      expect(c.sessionMode).toBe("local-unlock");
     });
   });
 
@@ -119,6 +120,19 @@ describe("daemonConfigFromEnv", () => {
     "\t",
   ])("explicit public origin rejects raw syntax %j before URL normalization", (origin) => {
     expect(() => daemonConfigFromEnv({ HOMELING_TAILSCALE_HOST: "home.ts.net", HOMELING_PUBLIC_ORIGIN: origin })).toThrow(/HOMELING_PUBLIC_ORIGIN/);
+  });
+
+  test("tailscale identity mode requires an explicit valid production trust configuration", () => {
+    const valid = { HOMELING_SESSION_MODE: "tailscale-identity", HOMELING_TAILSCALE_HOST: "home.ts.net", HOMELING_PUBLIC_ORIGIN: "https://home.ts.net:8443", HOMELING_TRUSTED_USERS: "alice" };
+    expect(daemonConfigFromEnv(valid)).toMatchObject({ sessionMode: "tailscale-identity", hostname: "127.0.0.1", publicOrigin: "https://home.ts.net:8443" });
+    for (const env of [
+      { ...valid, HOMELING_SESSION_MODE: "unknown" },
+      { ...valid, HOMELING_TRUSTED_USERS: "" },
+      { ...valid, HOMELING_TAILSCALE_HOST: "", HOMELING_PUBLIC_ORIGIN: "" },
+      { ...valid, HOMELING_PUBLIC_ORIGIN: "" },
+      { ...valid, HOMELING_SESSION_DEV_HTTP: "1" },
+      { ...valid, HOMELING_ALLOW_ANY_HOST: "1" },
+    ]) expect(() => daemonConfigFromEnv(env)).toThrow();
   });
 
   test("invalid port falls back to default", () => {

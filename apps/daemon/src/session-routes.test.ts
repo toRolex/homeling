@@ -71,6 +71,52 @@ test("8443 front door unlocks and admits writes only with exact transport and or
   expect(writes).toBe(1);
 });
 
+test("identity mode gates all private reads and writes, with only the exact health read public", async () => {
+  const identityCfg = daemonConfigFromEnv({ HOMELING_SESSION_MODE: "tailscale-identity", HOMELING_TAILSCALE_HOST: "home.ts.net", HOMELING_PUBLIC_ORIGIN: "https://home.ts.net:8443", HOMELING_TRUSTED_USERS: "alice" });
+  const session = new SessionController({ mode: "tailscale-identity", verify: () => { throw new Error("local verifier must not be read"); } });
+  const makeIdentityRequest = (path: string, method = "GET", overrides: Record<string, string | null> = {}, peer: string | null = "127.0.0.1") => {
+    const headers = new Headers({ host: "home.ts.net:8443", origin: "https://home.ts.net:8443", "tailscale-user-login": "alice", ...(method === "GET" || method === "HEAD" ? {} : { "content-type": "application/json" }) });
+    for (const [key, value] of Object.entries(overrides)) value === null ? headers.delete(key) : headers.set(key, value);
+    return Object.assign(new Request(`http://127.0.0.1:8790${path}`, { method, headers, ...(method === "GET" || method === "HEAD" ? {} : { body: "{}" }) }), { remoteAddress: peer });
+  };
+  let privateReads = 0;
+  const call = (path: string, method = "GET", headers: Record<string, string | null> = {}, peer: string | null = "127.0.0.1") => handleRequest(makeIdentityRequest(path, method, headers, peer), identityCfg, async () => { privateReads++; return Response.json({ private: true }); }, undefined, session);
+  for (const path of ["/lite/api/session", "/lite/api/snapshot", "/lite/api/persona/list", "/lite/api/push/status", "/lite/api/unknown"]) {
+    for (const invalid of [
+      [{ "tailscale-user-login": null }, "127.0.0.1"],
+      [{ "tailscale-user-login": "mallory" }, "127.0.0.1"],
+      [{ host: "home.ts.net:443" }, "127.0.0.1"],
+      [{ host: "home.ts.net:8444" }, "127.0.0.1"],
+      [{ host: "foreign.ts.net:8443" }, "127.0.0.1"],
+      [{ host: "localhost:8790", origin: "http://localhost:8790" }, "127.0.0.1"],
+      [{}, "100.64.0.2"],
+      [{}, null],
+    ] as const) {
+      expect([401, 403]).toContain((await call(path, "GET", invalid[0], invalid[1])).status);
+      expect([401, 403]).toContain((await call(path, "HEAD", invalid[0], invalid[1])).status);
+    }
+  }
+  expect((await call("/lite/api/health")).status).toBe(200);
+  expect((await call("/lite/api/health", "HEAD")).status).toBe(200);
+  expect((await call("/api/health", "GET", { host: "localhost:8790", origin: "http://localhost:8790", "tailscale-user-login": null })).status).toBe(404);
+  for (const [path, status] of [["/lite/api/session/establish", 200], ["/lite/api/session/unlock", 404], ["/lite/api/unknown", 423]] as const) {
+    const response = await call(path, "POST", { origin: "https://home.ts.net:8443" });
+    expect(response.status).toBe(status);
+  }
+  expect(privateReads).toBe(0);
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    for (const origin of [null, "null", "http://home.ts.net:8443", "https://home.ts.net", "https://home.ts.net:8444", "https://user@home.ts.net:8443", "https://home.ts.net:8443/lite/", "https://home.ts.net:8443?bad=1", "https://home.ts.net:8443#bad"]) {
+      const response = await call("/lite/api/session/establish", method, { origin });
+      expect(response.status).toBe(403);
+      expect(response.headers.get("set-cookie")).toBeNull();
+    }
+  }
+  expect((await call("/lite/api/session/establish", "POST", { origin: "https://home.ts.net" })).status).toBe(403);
+  expect((await call("/lite/api/session/establish", "POST", { origin: null })).status).toBe(403);
+  expect((await call("/lite/api/snapshot", "GET", { host: "home.ts.net:443" })).status).toBe(403);
+  expect(privateReads).toBe(0);
+});
+
 test("all business writes, unknown routes and loopback are locked with zero upstream effects", async () => {
   let writes = 0;
   const session = new SessionController({ verify: () => null });

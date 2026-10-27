@@ -47,8 +47,9 @@ function fakeServer(onReply: () => Promise<Response>) {
     if (url.includes("/session")) {
       if (init?.method === "POST") sessionWrites++;
       if (url.endsWith("/unlock")) locked = false;
+      if (url.endsWith("/establish")) locked = false;
       if (url.endsWith("/lock")) locked = true;
-      return Response.json({ locked, available: true, epoch: locked ? 0 : 1, generation: "boot", idleDeadline: Date.now() + 900_000, absoluteDeadline: Date.now() + 28_800_000, serverNow: Date.now() });
+      return Response.json({ mode: "local-unlock", locked, available: true, epoch: locked ? undefined : 1, generation: "boot", idleDeadline: Date.now() + 900_000, absoluteDeadline: Date.now() + 28_800_000, serverNow: Date.now() });
     }
     if (url.endsWith("/push/status")) return Response.json({ publicKey: "public", preferences: { enabled: false }, subscriptions: [{ endpoint: "https://fcm.googleapis.com/fcm/send/existing", locale: remoteLocale }], retractTags: [] });
     if (url.endsWith("/push/subscribe")) { enrollments++; const update = JSON.parse(String(init?.body)); remoteLocale = update.locale ?? remoteLocale; return Response.json({ ok: true }, { status: 201 }); }
@@ -102,7 +103,7 @@ test("failed manual server lock keeps drafts fail-closed and visibly unconfirmed
   let serverLocked = false;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).endsWith("/session/lock")) throw new Error("connection lost");
-    if (String(input).endsWith("/session") && serverLocked) return Response.json({ locked: true, available: true, epoch: 2, generation: "boot" });
+    if (String(input).endsWith("/session") && serverLocked) return Response.json({ mode: "local-unlock", locked: true, available: true, generation: "boot", serverNow: Date.now() });
     return transport(input, init);
   }) as typeof fetch;
   await mount("/settings"); await unlock();

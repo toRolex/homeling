@@ -44,7 +44,7 @@ function fakeServer(firstIdleMs = 700) {
   const secret = "x".repeat(43); // Fake fixture only, never real credentials.
   const documents = { facts: { content: "Original fact", revision: "facts-0" }, preferences: { content: "Short replies", revision: "preferences-0" }, project: { content: "Garden", revision: "project-0" } };
   const view = () => ({ documents, effective: "next-session", injection: { strategy: "first-message-prefix", unsupported: true, notice: "unsupported native injection; first-message prefix only, edits apply next session." } });
-  const state = () => ({ locked: locked || Date.now() >= deadline, available: true, epoch, generation: "root-memory-fixture", ...(deadline ? { idleDeadline: deadline, absoluteDeadline: deadline + 60_000, serverNow: Date.now() } : {}) });
+  const state = () => ({ mode: "local-unlock", locked: locked || Date.now() >= deadline, available: true, epoch, generation: "root-memory-fixture", serverNow: Date.now(), ...(deadline ? { idleDeadline: deadline, absoluteDeadline: deadline + 60_000 } : {}) });
   const fetcher = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const pathname = new URL(String(input), "https://homeling.test").pathname;
     if (init?.method && !["GET", "HEAD"].includes(init.method) && !pathname.startsWith("/lite/api/session")) businessAttempts++;

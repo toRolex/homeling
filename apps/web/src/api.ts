@@ -3,22 +3,22 @@ import type { ActivityResponse, ActivityTaskResponse, CreateResponse, Launcher, 
 
 import { sessionState } from "./session-state.ts";
 
+const API_PREFIX = `${import.meta.env.BASE_URL || "/lite/"}api/`;
+
 /** UI admission complements, never replaces, the daemon cookie/epoch gate. */
 export async function sessionMutationFetch(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
   let check: () => void;
-  try { check = sessionState.admit(); } catch { throw new ReplyRequestError("Unlock Homeling and confirm this action", false); }
+  try { check = sessionState.admit(); } catch { throw new ReplyRequestError("Session not ready; confirm the connection before trying this action", false); }
   const lease = sessionState.get();
-  if (!Number.isSafeInteger(lease.epoch) || !lease.generation) throw new ReplyRequestError("Unlock Homeling and confirm this action", false);
+  if (!Number.isSafeInteger(lease.epoch) || !lease.generation) throw new ReplyRequestError("Session not ready; confirm the connection before trying this action", false);
   const headers = new Headers(init.headers);
   headers.set("x-homeling-session-epoch", String(lease.epoch));
   headers.set("x-homeling-session-generation", lease.generation);
-  try { check(); } catch { throw new ReplyRequestError("Unlock Homeling and confirm this action", false); }
+  try { check(); } catch { throw new ReplyRequestError("Session not ready; confirm the connection before trying this action", false); }
   const response = await fetch(input, { ...init, headers });
   if (response.status === 423) sessionState.lock();
   return response;
 }
-
-const API_PREFIX = `${import.meta.env.BASE_URL || "/lite/"}api/`;
 
 /** Raw audio in, editable text out. This endpoint is deliberately pane-agnostic. */
 export async function transcribeAudio(audio: Blob, signal?: AbortSignal): Promise<string> {
@@ -130,7 +130,7 @@ export class PersonaDeleteError extends Error {
 }
 
 export async function deletePersona(personaId: string): Promise<PersonaDeleteResult> {
-  try { sessionState.admit()(); } catch { throw new PersonaDeleteError("Unlock Homeling before deleting", true); }
+  try { sessionState.admit()(); } catch { throw new PersonaDeleteError("Session not ready; confirm the connection before deleting", true); }
   const response = await sessionMutationFetch(`${API_PREFIX}persona/${encodeURIComponent(personaId)}`, {
     method: "DELETE", headers: { accept: "application/json", "content-type": "application/json" }, body: "{}",
   });
@@ -291,7 +291,7 @@ export async function sendPaneControlKey(paneId: string, action: ControlKeyActio
     let value: unknown;
     try { value = await response.json(); } catch { /* HTTP rejection below is still definite. */ }
     if (response.status === 423) {
-      return { outcome: definiteLockRefusal(value) ? "not-submitted" : "unknown", error: "Unlock Homeling before controlling the pane" };
+      return { outcome: definiteLockRefusal(value) ? "not-submitted" : "unknown", error: "Session not ready; confirm the connection before controlling the pane" };
     }
     if (value && typeof value === "object" && "outcome" in value) {
       const result = value as ControlKeyResult;

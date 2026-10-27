@@ -18,7 +18,7 @@ test("customization sends only name/avatar PATCH and locked sessions dispatch no
   }) as typeof fetch;
   expect(await updatePersonaAppearance("mira/one", patch)).toMatchObject(patch);
   sessionState.lock();
-  await expect(updatePersonaAppearance("mira/one", patch)).rejects.toThrow("Unlock");
+  await expect(updatePersonaAppearance("mira/one", patch)).rejects.toThrow("Session not ready");
   expect(writes).toBe(1);
 });
 

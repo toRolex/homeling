@@ -5,7 +5,11 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 
+export type SessionMode = "local-unlock" | "tailscale-identity";
+
 export interface DaemonConfig {
+  /** Authentication policy. Missing values from injected fixtures retain local-unlock behavior. */
+  readonly sessionMode?: SessionMode;
   /** Loopback listen port (default 8790, per PRD §3 / ADR-0004). */
   readonly port: number;
   /** Host to bind. Loopback only: tailscale serve does the TLS front door. */
@@ -115,14 +119,26 @@ export function daemonConfigFromEnv(env: Record<string, string | undefined>): Da
     (env.HOMELING_ALLOW_ANY_HOST ?? process.env.HOMELING_ALLOW_ANY_HOST ?? "").toLowerCase(),
   );
   const bridgeOrigin = readBridgeOrigin(env.HOMELING_BRIDGE_ORIGIN ?? process.env.HOMELING_BRIDGE_ORIGIN);
+  const sessionModeValue = env.HOMELING_SESSION_MODE ?? process.env.HOMELING_SESSION_MODE;
+  const sessionMode = sessionModeValue === undefined ? "local-unlock" : sessionModeValue;
+  if (sessionMode !== "local-unlock" && sessionMode !== "tailscale-identity") {
+    throw new Error("HOMELING_SESSION_MODE must be local-unlock or tailscale-identity");
+  }
+  const publicOriginValue = env.HOMELING_PUBLIC_ORIGIN ?? process.env.HOMELING_PUBLIC_ORIGIN;
+  const publicOrigin = readPublicOrigin(publicOriginValue, tailscaleHost);
+  const sessionDevHttp = (env.HOMELING_SESSION_DEV_HTTP ?? process.env.HOMELING_SESSION_DEV_HTTP) === "1";
+  if (sessionMode === "tailscale-identity" && (!trustedUsers.length || !tailscaleHost || !publicOriginValue?.trim() || !publicOrigin || allowAnyHost || sessionDevHttp)) {
+    throw new Error("tailscale-identity requires a trusted user, exact HTTPS public origin, and production transport");
+  }
   return {
+    sessionMode,
     port,
     hostname: "127.0.0.1",
     webDist,
     indexHtml: "index.html",
     trustedUsers,
     tailscaleHost,
-    publicOrigin: readPublicOrigin(env.HOMELING_PUBLIC_ORIGIN ?? process.env.HOMELING_PUBLIC_ORIGIN, tailscaleHost),
+    publicOrigin,
     allowAnyHost,
     bridgeOrigin,
     activityPath: env.HOMELING_ACTIVITY_PATH ?? process.env.HOMELING_ACTIVITY_PATH,
@@ -131,7 +147,7 @@ export function daemonConfigFromEnv(env: Record<string, string | undefined>): Da
     registryPath: env.HOMELING_REGISTRY_PATH ?? process.env.HOMELING_REGISTRY_PATH ?? join(homedir(), ".config", "homeling", "registry.json"),
     memoryPath: env.HOMELING_MEMORY_DIR ?? process.env.HOMELING_MEMORY_DIR ?? join(env.HOMELING_DATA_DIR ?? process.env.HOMELING_DATA_DIR ?? join(homedir(), "Library", "Application Support", "Homeling"), "memory"),
     unlockDataDir: env.HOMELING_DATA_DIR ?? process.env.HOMELING_DATA_DIR ?? join(homedir(), "Library", "Application Support", "Homeling"),
-    sessionDevHttp: (env.HOMELING_SESSION_DEV_HTTP ?? process.env.HOMELING_SESSION_DEV_HTTP) === "1",
+    sessionDevHttp,
     herdrSocketPath: env.HERDR_SOCKET_PATH ?? process.env.HERDR_SOCKET_PATH ?? join(homedir(), ".config", "herdr", "herdr.sock"),
   };
 }
