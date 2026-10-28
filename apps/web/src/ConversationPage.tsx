@@ -229,6 +229,7 @@ function PaneConversation({ paneId, personaId, persona, draft, setDraft, persona
         const update = requestPollState.current!.accept(pollVersion, requests, paneId);
         if (!update) return;
         for (const request of update.settled) {
+          if (request.kind === "prompt-select" && request.payload.collaboration) continue;
           window.setTimeout(() => {
             setSettledRequests((current) => current.filter((item) => item.id !== request.id));
           }, 5000);
@@ -254,6 +255,8 @@ function PaneConversation({ paneId, personaId, persona, draft, setDraft, persona
     requestPollState.current!.settle(request.id);
     setPendingRequests((current) => current.filter((item) => item.id !== request.id));
     setSettledRequests((current) => [...current.filter((item) => item.id !== request.id), request]);
+    // Cooperation may still need inspection/advance after the answer was saved.
+    if (request.kind === "prompt-select" && request.payload.collaboration) return;
     window.setTimeout(() => {
       setSettledRequests((current) => current.filter((item) => item.id !== request.id));
     }, 5000);
@@ -480,7 +483,7 @@ function PaneConversation({ paneId, personaId, persona, draft, setDraft, persona
                   <PendingRequestCard
                     key={request.id}
                     request={request}
-                    onApprove={(id, option) => approvePendingRequest(id, option, occurrenceKey ?? request.taskOccurrenceKey)}
+                    onApprove={(id, option, freeText) => approvePendingRequest(id, option, occurrenceKey ?? request.taskOccurrenceKey, freeText)}
                     onSettled={keepSettledRequest}
                   />
                 ))}

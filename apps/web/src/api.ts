@@ -218,13 +218,42 @@ export function fetchPendingRequests(signal?: AbortSignal, occurrenceKey?: strin
 export interface ApprovalResponse {
   readonly status: "pending" | "resolved" | "expired";
   readonly outcome: "submitted" | "unknown" | "already-handled" | "stale" | "not-submitted";
+  readonly dispatch?: CooperationDispatch;
 }
 
-export async function approvePendingRequest(requestId: string, optionId: string, occurrenceKey?: string): Promise<ApprovalResponse> {
+export interface CooperationDispatch {
+  readonly dispatched: boolean;
+  readonly outcome?: "submitted" | "not-submitted" | "unknown";
+  readonly reason?: string;
+}
+
+export interface CooperationInspection {
+  readonly task: { readonly steps: readonly { readonly id: string; readonly status: string }[] };
+}
+
+export async function inspectCooperation(occurrenceKey: string): Promise<CooperationInspection> {
+  const result = await getJson<CooperationInspection | null>(`activity/task/${encodeURIComponent(occurrenceKey)}/cooperation`);
+  if (!Array.isArray(result?.task?.steps) || !result.task.steps.every(step => step &&
+    typeof step.id === "string" && ["pending", "waiting", "running", "unknown", "done"].includes(step.status))) {
+    throw new Error("Cooperation inspection unavailable");
+  }
+  return result;
+}
+
+export async function advanceCooperation(occurrenceKey: string): Promise<CooperationDispatch> {
+  const response = await sessionMutationFetch(`${API_PREFIX}activity/task/${encodeURIComponent(occurrenceKey)}/cooperation/advance`, {
+    method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: "{}",
+  });
+  const result = await response.json();
+  if (!response.ok || typeof result?.dispatched !== "boolean") throw new Error(`advance ${response.status}`);
+  return result;
+}
+
+export async function approvePendingRequest(requestId: string, optionId: string, occurrenceKey?: string, freeText?: string): Promise<ApprovalResponse> {
   const response = await sessionMutationFetch(`${API_PREFIX}requests/${encodeURIComponent(requestId)}/approve`, {
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({ optionId, ...(occurrenceKey === undefined ? {} : { occurrenceKey }) }),
+    body: JSON.stringify({ optionId, ...(occurrenceKey === undefined ? {} : { occurrenceKey }), ...(freeText === undefined ? {} : { freeText }) }),
   });
   let result: (ApprovalResponse & { deliveryUnknown?: boolean }) | null = null;
   try {

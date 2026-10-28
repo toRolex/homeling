@@ -13,6 +13,8 @@ import { daemonConfigFromEnv, type DaemonConfig } from "./config.ts";
 import { controlKeyBlocksText, sendControlKey } from "./control-key.ts";
 import { BROWSER_API_PREFIX, proxyBridgeRequest, proxyTargetUrl, type BridgeFetch } from "./bridge-proxy.ts";
 import { approvePendingRequest, collectPendingRequests, PendingRequestStore } from "./requests.ts";
+import { handleCooperationRequest, advanceCooperationTask } from "./task-cooperation-routes.ts";
+import { CooperationConflict, InvalidCooperation } from "./task-cooperation.ts";
 import { serveStatic, type StaticDir } from "./static.ts";
 import { HerdrSocketClient } from "./herdr-client.ts";
 import { handleMemoryRequest, isMemoryPath } from "./memory-routes.ts";
@@ -196,6 +198,13 @@ export async function handleRequest(
   }
 
   const runtime = runtimeOverride ?? personaRuntime(cfg, upstreamFetch);
+  try {
+    const cooperationResponse = await handleCooperationRequest(req, runtime, admission, upstreamFetch);
+    if (cooperationResponse) return cooperationResponse;
+  } catch (error) {
+    if (error instanceof SessionLocked) return sessionRefusal();
+    throw error;
+  }
   const taskAction = pathname.match(/^\/lite\/api\/activity\/task\/([^/]+)\/(history|screen|reply|stop|control-key)$/);
   if (taskAction) {
     if (!runtime.activity) return Response.json({ error: "Activity unavailable" }, { status: 503 });
@@ -310,6 +319,12 @@ export async function handleRequest(
   }
 
   const store = requestStore(cfg);
+  const collectRequests = async () => {
+    const cooperation = await runtime.activity?.cooperationPending() ?? [];
+    const native = await collectPendingRequests(cfg, fetcher, store, req.headers.get('tailscale-user-login'),
+      Date.now(), pane => resolvePendingOwnership(runtime, pane));
+    return [...native, ...cooperation];
+  };
   if (req.method === "POST" && /^\/lite\/api\/pane\/[^/]+\/control-key$/.test(pathname)) {
     return sendControlKey(req, cfg, fetcher, store);
   }
@@ -321,7 +336,7 @@ export async function handleRequest(
     try { key = decodeURIComponent(taskRequestsMatch[1]!); } catch { return Response.json({ error: 'invalid task occurrence' }, { status: 400 }); }
     try {
       const task = await runtime.activity.assertCurrent(key);
-      const requests = await collectPendingRequests(cfg, fetcher, store, req.headers.get('tailscale-user-login'), Date.now(), pane => resolvePendingOwnership(runtime, pane));
+      const requests = await collectRequests();
       await runtime.activity.assertCurrent(key);
       return Response.json(requests.filter(item => item.paneId === task.paneId && item.taskOccurrenceKey === key), { headers: { 'cache-control': 'no-store' } });
     } catch (error) {
@@ -330,7 +345,7 @@ export async function handleRequest(
   }
   if (pathname === API_REQUESTS_PATH && req.method === "GET") {
     try {
-      return Response.json(await collectPendingRequests(cfg, fetcher, store, req.headers.get("tailscale-user-login"), Date.now(), pane => resolvePendingOwnership(runtime, pane)));
+      return Response.json(await collectRequests());
     } catch {
       return Response.json({ error: "bridge unavailable" }, { status: 502 });
     }
@@ -344,9 +359,9 @@ export async function handleRequest(
         headers: { "content-type": "text/plain; charset=utf-8" },
       });
     }
-    let body: { optionId?: unknown; occurrenceKey?: unknown };
+    let body: { optionId?: unknown; occurrenceKey?: unknown; freeText?: unknown };
     try {
-      body = await req.json() as { optionId?: unknown; occurrenceKey?: unknown };
+      body = await req.json() as { optionId?: unknown; occurrenceKey?: unknown; freeText?: unknown };
     } catch {
       return Response.json({ error: "bad body" }, { status: 400 });
     }
@@ -358,6 +373,31 @@ export async function handleRequest(
       id = decodeURIComponent(approvalMatch[1]!);
     } catch {
       return Response.json({ error: "invalid request id" }, { status: 400 });
+    }
+    if (id.startsWith("cooperation:")) {
+      if (!runtime.activity) return Response.json({ error: "Activity unavailable" }, { status: 503 });
+      if (body.occurrenceKey !== undefined && typeof body.occurrenceKey !== "string" ||
+        body.freeText !== undefined && (typeof body.freeText !== "string" || body.freeText.length > 10000)) {
+        return Response.json({ error: "invalid cooperation reply" }, { status: 400 });
+      }
+      try {
+        const outcome = await runtime.activity.answerCooperationRequest(id, body.optionId,
+          body.occurrenceKey as string | undefined, admission!, body.freeText as string | undefined);
+        const advancePath = `/lite/api/activity/task/${encodeURIComponent(outcome.occurrenceKey)}/cooperation/advance`;
+        let dispatch: unknown;
+        if (outcome.outcome === "submitted") {
+          // 回答已持久化；派发单独报告，显式 advance 仍遵守 running / unknown 屏障。
+          try { dispatch = await advanceCooperationTask(outcome.occurrenceKey, req, runtime, admission!, upstreamFetch); }
+          catch {
+            dispatch = { dispatched: false, outcome: "unknown", reason: "inspect-task-before-advance", error: "Cooperation advance failed" };
+          }
+        }
+        return Response.json({ ...outcome, dispatch, advancePath }, { status: outcome.status === "expired" ? 409 : 200 });
+      } catch (error) {
+        if (error instanceof SessionLocked) return sessionRefusal();
+        return Response.json({ status: "expired", outcome: "stale", error: "Cooperation reply unavailable" },
+          { status: error instanceof InvalidCooperation ? 400 : error instanceof TaskOccurrenceUnavailable || error instanceof CooperationConflict ? 409 : 502 });
+      }
     }
     const record = store.find(id)?.request;
     if (body.occurrenceKey !== undefined && (typeof body.occurrenceKey !== 'string' || body.occurrenceKey !== record?.taskOccurrenceKey)) {

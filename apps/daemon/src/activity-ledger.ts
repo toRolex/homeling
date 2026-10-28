@@ -6,8 +6,13 @@ import type { MutationAdmission } from "./session-lock.ts";
 import type { SystemAdmission } from "./system-admission.ts";
 import type { TaskResultAdmission } from "./mutation-result.ts";
 
+import { acceptance, answerCooperation, cooperationRequests, createCooperation, planCooperation, runnableSteps,
+  updateCooperation, validateCooperation, CooperationConflict } from "./task-cooperation.ts";
+import type { CooperationState } from "./task-cooperation.ts";
+
 interface LedgerState {
   version: 1;
+  cooperation?: Record<string, CooperationState>;
   events: ActivityEvent[];
   occurrences: TaskOccurrence[];
   worked?: string[];
@@ -50,6 +55,14 @@ function validatedLedger(value: unknown): LedgerState {
   if (value.worked !== undefined && (!Array.isArray(value.worked) || value.worked.some((key) => typeof key !== "string" || !occurrences.has(key)))) return invalid();
   for (const epochs of [value.workEpochs, value.completionEpochs]) {
     if (epochs !== undefined && (!object(epochs) || Object.entries(epochs).some(([key, epoch]) => !occurrences.has(key) || !text(epoch)))) return invalid();
+  }
+  if (value.cooperation !== undefined) {
+    if (!object(value.cooperation)) return invalid();
+    for (const [key, cooperation] of Object.entries(value.cooperation)) {
+      if (!occurrences.has(key)) return invalid();
+      validateCooperation(cooperation);
+      if (cooperation.task.runId !== key) return invalid();
+    }
   }
   return value as unknown as LedgerState;
 }
@@ -208,12 +221,20 @@ export class ActivityLedger {
       }
       if (occurrence.status !== "active") return { result: undefined, changed: false };
       if (raw.status === "working") {
-        if (state.workEpochs?.[occurrence.occurrenceKey] === this.observationEpoch) return { result: undefined, changed: false };
+        const cooperation = state.cooperation?.[occurrence.occurrenceKey];
+        const wasDone = cooperation?.agentDone === true;
+        if (cooperation) cooperation.agentDone = false;
+        if (state.workEpochs?.[occurrence.occurrenceKey] === this.observationEpoch) return { result: undefined, changed: wasDone };
         state.workEpochs ??= {};
         state.workEpochs[occurrence.occurrenceKey] = this.observationEpoch;
         return { result: undefined, changed: true };
       }
       if (raw.status !== "done" || state.workEpochs?.[occurrence.occurrenceKey] !== this.observationEpoch) return { result: undefined, changed: false };
+      const cooperation = state.cooperation?.[occurrence.occurrenceKey];
+      if (cooperation) {
+        cooperation.agentDone = true;
+        if (!acceptance(cooperation).complete) return { result: undefined, changed: true };
+      }
       this.settle(state, occurrence, "completed", "herdr.event");
       state.completionEpochs ??= {};
       state.completionEpochs[occurrence.occurrenceKey] = this.observationEpoch;
@@ -234,6 +255,10 @@ export class ActivityLedger {
       this.observationEpoch = randomUUID();
       const latest = new Map(state.occurrences.map((item) => [item.paneId, item]));
       for (const occurrence of latest.values()) {
+        const cooperation = state.cooperation?.[occurrence.occurrenceKey];
+        if (cooperation) {
+          cooperation.task.steps.filter(step => step.status === "running").forEach(step => { step.status = "unknown"; });
+        }
         this.append(state, occurrence, "observation.gap", "daemon.observer", reason, `${occurrence.occurrenceKey}:observation.gap:${this.observationEpoch}`);
         this.settle(state, occurrence, "unknown", "daemon.observer", "Observation gap: completion/failure cannot be recovered from snapshots");
       }
@@ -253,6 +278,123 @@ export class ActivityLedger {
       const occurrence = state.occurrences.find((item) => item.occurrenceKey === occurrenceKey);
       if (!occurrence || occurrence.status !== "active") return { result: undefined, changed: false };
       this.settle(state, occurrence, "failed", "daemon.launch", reason);
+      return { result: undefined, changed: true };
+    });
+  }
+
+  /** 协作计划与 Activity 共用串行提交和原子文件替换，不引入第二套任务身份。 */
+  async cooperation(occurrenceKey: string) {
+    await this.tail;
+    const state = await this.read();
+    if (!this.lookup(state, occurrenceKey)) throw new TaskOccurrenceUnavailable();
+    const cooperation = state.cooperation?.[occurrenceKey];
+    return cooperation ? { ...structuredClone(cooperation), acceptance: acceptance(cooperation),
+      runnableStepIds: runnableSteps(cooperation).map(step => step.id) } : null;
+  }
+
+  async cooperationPending() {
+    await this.tail;
+    const state = await this.read();
+    return state.occurrences.filter(occurrence => this.lookup(state, occurrence.occurrenceKey)?.liveAvailable)
+      .flatMap(occurrence => {
+        const cooperation = state.cooperation?.[occurrence.occurrenceKey];
+        return cooperation ? cooperationRequests(cooperation, occurrence) : [];
+      });
+  }
+
+  configureCooperation(key: string, input: unknown, admission: MutationAdmission) {
+    return this.commit(admission, state => {
+      const occurrence = this.current(state, key);
+      if (state.cooperation?.[key]) throw new CooperationConflict("任务已配置协作计划；请使用版本化更新");
+      const cooperation = createCooperation(input, occurrence);
+      planCooperation(cooperation);
+      state.cooperation ??= {};
+      state.cooperation[key] = cooperation;
+      return { result: cooperation, changed: true };
+    });
+  }
+
+  changeCooperation(key: string, input: unknown, admission: MutationAdmission) {
+    return this.commit(admission, state => {
+      const occurrence = this.current(state, key);
+      const cooperation = state.cooperation?.[key];
+      if (!cooperation) throw new CooperationConflict("任务没有协作计划");
+      updateCooperation(cooperation, input);
+      planCooperation(cooperation);
+      cooperation.revision++;
+      if (cooperation.agentDone && acceptance(cooperation).complete) {
+        this.settle(state, occurrence, "completed", "daemon.observer", "All required versioned checks passed");
+        state.completionEpochs ??= {};
+        state.completionEpochs[key] = this.observationEpoch;
+      }
+      return { result: cooperation, changed: true };
+    });
+  }
+
+  answerCooperationRequest(id: string, optionId: string, key: string | undefined,
+    admission: MutationAdmission, freeText?: string) {
+    return this.commit(admission, state => {
+      const entry = Object.entries(state.cooperation ?? {}).find(([, c]) => c.requests.some(r => r.id === id));
+      if (!entry || key !== undefined && key !== entry[0]) throw new TaskOccurrenceUnavailable();
+      this.current(state, entry[0]);
+      const cooperation = entry[1];
+      const result = answerCooperation(cooperation, id, optionId, freeText);
+      planCooperation(cooperation);
+      cooperation.revision++;
+      return { result: { ...result, occurrenceKey: entry[0] }, changed: true };
+    });
+  }
+
+  /** 派发前先持久登记 running；重复 advance 不会再次派发该阶段。 */
+  beginCooperationStep(key: string, admission: MutationAdmission) {
+    return this.commit<{ paneId: string; stepId: string; text: string } | null>(admission, state => {
+      const occurrence = this.current(state, key);
+      const cooperation = state.cooperation?.[key];
+      if (!cooperation) throw new CooperationConflict("任务没有协作计划");
+      if (cooperation.task.steps.some(step => step.status === "running" || step.status === "unknown")) {
+        return { result: null, changed: false };
+      }
+      const step = runnableSteps(cooperation)[0];
+      if (!step) return { result: null, changed: false };
+      step.status = "running";
+      cooperation.agentDone = false;
+      cooperation.revision++;
+      const text = ["[Homeling collaboration step]", `runId: ${key}`, `stepId: ${step.id}`,
+        `revision: ${cooperation.revision}`, cooperation.instructions[step.id],
+        "Confirmed requirements:", JSON.stringify(Object.fromEntries(Object.entries(cooperation.task.requirements).filter(([id]) =>
+          !cooperation.questions.some(q => q.requirementId === id && cooperation.task.steps.some(s => s.questionIds.includes(q.id)))))),
+        "Execute only this stage. Keep versioned output and evidence for stage checks.",
+        "[End Homeling collaboration step]"].join("\n");
+      return { result: { paneId: occurrence.paneId, stepId: step.id, text }, changed: true };
+    });
+  }
+
+  async dispatchCooperationStep<T>(key: string, stepId: string, admission: MutationAdmission,
+    effect: (occurrence: TaskOccurrence) => T): Promise<Awaited<T>> {
+    const dispatched = this.tail.then(async () => {
+      admission.assert();
+      const state = await this.read();
+      const occurrence = this.current(state, key);
+      if (state.cooperation?.[key]?.task.steps.find(step => step.id === stepId)?.status !== "running") {
+        throw new CooperationConflict("阶段状态已改变，取消派发");
+      }
+      return { result: admission.dispatch(() => effect(occurrence)) };
+    });
+    this.tail = dispatched.then(() => undefined, () => undefined);
+    return await dispatched.then(({ result }) => result);
+  }
+
+  finishCooperationDelivery(key: string, stepId: string, outcome: "submitted" | "not-submitted" | "unknown",
+    admission: MutationAdmission) {
+    return this.commit(admission, state => {
+      this.current(state, key);
+      const cooperation = state.cooperation?.[key];
+      const step = cooperation?.task.steps.find(item => item.id === stepId);
+      if (!cooperation || !step || step.status !== "running") throw new CooperationConflict("阶段派发状态已改变");
+      if (outcome === "not-submitted") step.status = "pending";
+      if (outcome === "unknown") step.status = "unknown";
+      cooperation.task.events.push({ kind: "step.dispatched", detail: JSON.stringify({ stepId, outcome }) });
+      cooperation.revision++;
       return { result: undefined, changed: true };
     });
   }
