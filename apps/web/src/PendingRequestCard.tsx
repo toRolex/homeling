@@ -1,7 +1,7 @@
 import { useLocale, type Translate } from "./locale.tsx";
 import { useRef, useState, type ReactElement } from "react";
 import type { PendingRequest, PendingRequestStatus } from "@homeling/contracts";
-import { ReplyRequestError, type ApprovalResponse } from "./api.ts";
+import { advanceCooperation, inspectCooperation, ReplyRequestError, type ApprovalResponse, type CooperationDispatch, type CooperationInspection } from "./api.ts";
 import { createSingleFlightApproval } from "./approval-guard.ts";
 
 export interface PendingRequestCardProps {
@@ -25,10 +25,16 @@ export function PendingRequestCard({ request, onApprove, onSettled }: PendingReq
   const [busyOption, setBusyOption] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [dispatch, setDispatch] = useState<CooperationDispatch | null>(null);
+  const [inspection, setInspection] = useState<CooperationInspection | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState(false);
+  const recoveryFlight = useRef(false);
   const submit = useRef<((optionId: string) => Promise<ApprovalResponse | null>) | null>(null);
   if (!submit.current) submit.current = createSingleFlightApproval((optionId) => onApprove(request.id, optionId, optionId === "__free_text__" ? freeTextRef.current : undefined));
   const visibleStatus = request.status === "pending" ? status : request.status;
   const disabled = visibleStatus !== "pending" || busyOption !== null;
+  const showRecovery = collaboration && visibleStatus !== "pending";
 
   async function choose(optionId: string): Promise<void> {
     if (disabled) return;
@@ -45,6 +51,10 @@ export function PendingRequestCard({ request, onApprove, onSettled }: PendingReq
         ? result.outcome === "stale" ? "expired" : "resolved"
         : result.status;
       const unknown = result.outcome === "unknown";
+      if (collaboration && result.outcome === "submitted") {
+        // The reply is durable; a missing dispatch acknowledgement is not execution success.
+        setDispatch(result.dispatch ?? { dispatched: false, outcome: "unknown", reason: "inspect-task-before-advance" });
+      }
       setMessage(null);
       setStatus(nextStatus);
       setUncertain(unknown);
@@ -63,6 +73,25 @@ export function PendingRequestCard({ request, onApprove, onSettled }: PendingReq
     }
   }
 
+  async function recover(advance = false): Promise<void> {
+    if (!request.taskOccurrenceKey || recoveryFlight.current) return;
+    recoveryFlight.current = true;
+    setRecoveryBusy(true);
+    setRecoveryError(false);
+    setInspection(null);
+    try {
+      if (advance) setDispatch(await advanceCooperation(request.taskOccurrenceKey));
+      setInspection(await inspectCooperation(request.taskOccurrenceKey));
+    } catch {
+      // A lost response can follow a write: invalidate inspection, never auto-retry.
+      setRecoveryError(true);
+      if (advance) setDispatch({ dispatched: false, outcome: "unknown" });
+    } finally {
+      recoveryFlight.current = false;
+      setRecoveryBusy(false);
+    }
+  }
+
   return (
     <article
       aria-label={request.kind === "preview-select" ? t("permission.previewRequest") : t("permission.request")}
@@ -77,6 +106,20 @@ export function PendingRequestCard({ request, onApprove, onSettled }: PendingReq
         </div>
         <p role="status" className="shrink-0 text-right text-xs text-amber-200">{message ? t(message) : statusLabel(t, visibleStatus, uncertain)}</p>
       </div>
+      {showRecovery ? <div className="mb-3 space-y-2 text-sm">
+        <p role="status">{t(!dispatch ? "permission.cooperationChanged" : dispatch.dispatched ? "permission.stageDispatched" : dispatch.outcome === "unknown" || dispatch.reason === "waiting-for-answer-evidence-or-execution" ? "permission.stageUnknown" : "permission.stageNotDispatched")}</p>
+        {dispatch?.reason ? <p>{dispatch.reason}</p> : null}
+        {request.taskOccurrenceKey ? <>
+          <button type="button" disabled={recoveryBusy} onClick={() => void recover()} className="min-h-11 underline disabled:opacity-50">{t("permission.inspectStage")}</button>
+          {inspection ? <>
+            <ul>{inspection.task.steps.map(step => <li key={step.id}>{step.id}: {step.status}</li>)}</ul>
+            <button type="button"
+              disabled={recoveryBusy || !inspection.task.steps.some(step => step.status === "pending") || inspection.task.steps.some(step => step.status === "running" || step.status === "unknown")}
+              onClick={() => void recover(true)} className="min-h-11 underline disabled:opacity-50">{t("permission.advanceStage")}</button>
+          </> : null}
+          {recoveryError ? <p role="alert">{t("permission.stageRecoveryUnknown")}</p> : null}
+        </> : null}
+      </div> : null}
       {request.kind === "prompt-select" && request.payload.subject?.length ? (
         <div className="mb-3 rounded-lg bg-black/20 px-3 py-2 text-xs text-amber-100/90">
           {request.payload.subject.map((line, index) => <p key={index}>{line}</p>)}

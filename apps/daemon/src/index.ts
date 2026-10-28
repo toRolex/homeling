@@ -321,14 +321,9 @@ export async function handleRequest(
   const store = requestStore(cfg);
   const collectRequests = async () => {
     const cooperation = await runtime.activity?.cooperationPending() ?? [];
-    try {
-      const native = await collectPendingRequests(cfg, fetcher, store, req.headers.get('tailscale-user-login'),
-        Date.now(), pane => resolvePendingOwnership(runtime, pane));
-      return [...native, ...cooperation];
-    } catch (error) {
-      if (cooperation.length) return cooperation;
-      throw error;
-    }
+    const native = await collectPendingRequests(cfg, fetcher, store, req.headers.get('tailscale-user-login'),
+      Date.now(), pane => resolvePendingOwnership(runtime, pane));
+    return [...native, ...cooperation];
   };
   if (req.method === "POST" && /^\/lite\/api\/pane\/[^/]+\/control-key$/.test(pathname)) {
     return sendControlKey(req, cfg, fetcher, store);
@@ -388,12 +383,16 @@ export async function handleRequest(
       try {
         const outcome = await runtime.activity.answerCooperationRequest(id, body.optionId,
           body.occurrenceKey as string | undefined, admission!, body.freeText as string | undefined);
+        const advancePath = `/lite/api/activity/task/${encodeURIComponent(outcome.occurrenceKey)}/cooperation/advance`;
+        let dispatch: unknown;
         if (outcome.outcome === "submitted") {
-          // 回复到达后重排，只派发当下仍满足条件的一步。
-          try { await advanceCooperationTask(outcome.occurrenceKey, req, runtime, admission!, upstreamFetch); }
-          catch { /* 回答已经持久化；派发异常由阶段状态和后续 advance 核查。 */ }
+          // 回答已持久化；派发单独报告，显式 advance 仍遵守 running / unknown 屏障。
+          try { dispatch = await advanceCooperationTask(outcome.occurrenceKey, req, runtime, admission!, upstreamFetch); }
+          catch {
+            dispatch = { dispatched: false, outcome: "unknown", reason: "inspect-task-before-advance", error: "Cooperation advance failed" };
+          }
         }
-        return Response.json(outcome, { status: outcome.status === "expired" ? 409 : 200 });
+        return Response.json({ ...outcome, dispatch, advancePath }, { status: outcome.status === "expired" ? 409 : 200 });
       } catch (error) {
         if (error instanceof SessionLocked) return sessionRefusal();
         return Response.json({ status: "expired", outcome: "stale", error: "Cooperation reply unavailable" },

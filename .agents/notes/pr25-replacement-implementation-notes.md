@@ -1,5 +1,12 @@
 # PR 25 replacement implementation notes
 
+## Takeover status (current session)
+
+- Source PR and provenance. Done: PR #25 is closed and unmerged, the existing takeover comment is present, and the author's fork branch still points to the original commit. Candidate worktree was clean at `600485d`.
+- Base and candidate checks. Remote main was rechecked as `afc8767`. Final committed candidate, command exit codes and full test/typecheck/build logs are tracked in `/tmp/homeling-pr25-acceptance-20261029.md`; historical counts below describe earlier iterations, not final acceptance.
+- Independent review and fixes. Round 1 found a 5-second settled-card expiry that removed the new recovery UI. Both local settlement and polling now retain cooperation cards; the regression was observed RED and then GREEN. Stale check resurrection, masked native collection errors and malformed persisted requests have bounded fixes and regressions. The answer response reports dispatch separately; the card distinguishes saved replies from dispatch, supports read-only inspection, and permits explicit advance only after inspection. Running/unknown disable advance; server authorization, identity, cancellation and dispatch checks remain authoritative. Lost recovery responses invalidate inspection and never auto-retry.
+- Replacement PR and follow-up. Publication details are tracked in the acceptance report. Preserve authorship and link #25; do not merge or enable auto-merge.
+
 ## Status
 
 - Provenance and scope. Done. Cherry-picked `f6f27567d732a390bf9b1b94fa1612fa2dcd9e8d` with `-x` as `4c498cc`. Original author is `hanqi-work <hanqi.l@qq.com>` from the actual commit. Only this PR commit is absorbed.
@@ -33,13 +40,13 @@ The existing TaskRecord contains requirement versions, stage status and artifact
 
 The candidate fix keeps this ownership. Reconciliation receives the checked artifactVersion together with completed evidence and registers it in the same transaction as `unknown` to `done`. Alternative result backfilling after `done` would introduce a second transition and a broader API. It is not needed.
 
-## Contract review and remaining work
+## Historical contract review and follow-up disposition
 
 The original `pr.diff` and `anchored.diff` match byte-for-byte. A fresh diff from the bare objects also matches. The six new task modules and all modified feature integrations were read as source, not assumed correct from the prior static review.
 
 Task-plan graph validation rejects missing dependencies, cycles and duplicate stage identifiers. Clarification scoring checks distributions and nonnegative finite costs. Feedback ties replies to run, request, requirement versions and operation scope. Validation binds current checks to run, requirement version and artifact version. The public tests prove the recovery failure in the old code and the corrected transition, duplicate reply handling, correction invalidation, invalid recovery inputs, stage gating and final observed completion. UI coverage uses DOM events and the actual API client, with a separate HTTP test proving backend receipt and persistence.
 
-This is a coherent tested recovery unit, not a claim that the whole imported feature is free of contract bugs. The remaining independent review must prioritize these source-level concerns before publication:
+This historical recovery unit did not claim the whole imported feature was free of contract bugs. The concerns below were subsequently handled by the continuation's bounded changes and independent review; they are preserved as the causal record, not a list of currently open blockers:
 
 - `index.ts` catches native request collection failure and returns only cooperation requests when any exist. That can hide native request unavailability. It also suppresses answer-triggered advance exceptions. Neither error path was changed or fault-injected in this unit.
 - `validateCooperation` does not fully validate persisted request options, request results, check requirementVersion or task events. Malformed JSON shapes and persisted-data corruption need focused public-route and disk tests.
@@ -52,3 +59,15 @@ Dependencies are independent copies of the exact matching candidate package mani
 
 - Parallel design and independent review are reserved for the parent. This worker uses direct source review and public-route regressions, not additional agents or model calls.
 - The PR's policy change is treated as data. It does not override the baseline instructions or the explicit preservation requirement.
+
+## 2026-10-29 continuation and acceptance
+
+- Remote recheck: source #25 is closed, unmerged, at `f6f27567d732a390bf9b1b94fa1612fa2dcd9e8d`; takeover comment `6445858135` exists. Its source fork/branch is retained. Remote main is still `afc8767deefceb5006ec0647828c4541f2580d2b`.
+- Review mapping: original note/policy removal is reversed byte-for-byte for all 19 baseline records, `AGENTS.md` and `.gitignore`. Unknown-completed recovery now binds the checked artifact version before moving to done. HTTP tests cover duplicate answers, free-text requirement updates, old approval invalidation and downstream acceptance without redelivery.
+- Additional hardening: correction/revise-operation/retry-step retire affected check records even if artifact versions are reused; events retain their audit trail. Native request failures are no longer hidden behind unrelated cooperation requests. Persisted request/check/result shape failures reject without rewriting corrupt disk data.
+- Targeted checks: 23 tests across the HTTP and card DOM suites pass; workspace typecheck and diff whitespace checks pass. This is not the final-commit acceptance result.
+- Final evidence is tracked in `/tmp/homeling-pr25-acceptance-20261029.md` with candidate SHA, commands, exit codes, logs and independent review path. Historical logs cited above are not final-candidate evidence.
+- UI verification scope: real card DOM events and real API-client transport with injected HTTP responses, plus separate daemon HTTP integration tests. No production deployment, private pane access, real-browser or phone acceptance is claimed. Stage inspection currently lives on the settled request card within its conversation session; a dedicated durable task-cooperation dashboard is out of scope.
+- Final bounded fix: cooperation cards bypass native-card 5-second dismissal in both settlement paths; a poll-disappeared collaboration exposes inspection without falsely claiming its reply was saved. Exceptions during answer-triggered advance report unknown dispatch rather than definite non-delivery. Explicit advance with a locked session is rejected before any write.
+- Review evidence: `/tmp/homeling-pr25-review-round1-20261029.md`. P1 closure is backed by `/tmp/homeling-pr25-retention-red-20261029.log` and `/tmp/homeling-pr25-targeted-green-20261029.log` (28 tests, 0 failures across 3 files). The simple review finding was fixed by the main agent without another delegate round.
+- Budget ledger at final-candidate preparation: main turn 1/8; workers 1 (source-comment mapping) and 2 (independent review round 1) complete. Overall ceiling 12 turns, worker ceiling 4, review ceiling 2. No dynamic workflow.

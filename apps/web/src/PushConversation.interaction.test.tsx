@@ -71,3 +71,47 @@ test('current task notification route renders the real approval card through sco
   await act(async () => { yes!.dispatchEvent(new window.MouseEvent('click', { bubbles: true }) as unknown as Event); });
   expect(submitted).toEqual({ optionId: '1', occurrenceKey: 'run' });
 });
+
+for (const settlement of ['local', 'poll'] as const) {
+test(`${settlement} cooperation settlement retains recovery after native-card dismissal and request polling`, async () => {
+  const timers = new Map<number, { callback: () => void; delay: number }>();
+  let timerId = 0;
+  const schedule = window.setTimeout, cancel = window.clearTimeout;
+  window.setTimeout = ((callback: () => void, delay: number) => { timers.set(++timerId, { callback, delay }); return timerId; }) as unknown as typeof window.setTimeout;
+  window.clearTimeout = ((id: number) => { timers.delete(id); }) as unknown as typeof window.clearTimeout;
+  let answered = false;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/activity/task/run')) return Response.json({ occurrence, current: true, observation: 'live', liveAvailable: true });
+    if (url.endsWith('/history')) return Response.json({ paneId: 'task', available: true, entries: [], hasMore: false, total: 0, fileTruncated: false });
+    if (url.endsWith('/requests')) return Response.json(answered ? [] : [{ id: 'cooperation:run', paneId: 'task', taskOccurrenceKey: 'run', status: 'pending', createdAt: occurrence.createdAt, kind: 'prompt-select', payload: {
+      question: 'Cooperation approval', options: [{ id: 'approve', label: 'Approve stage' }], collaboration: { freeText: false, details: [] },
+    } }]);
+    if (url.endsWith('/approve')) { answered = true; return Response.json({ status: 'resolved', outcome: 'submitted', dispatch: { dispatched: false, reason: 'snapshot-unavailable' } }); }
+    if (url.endsWith('/cooperation')) return Response.json({ task: { steps: [{ id: 'prepare', status: 'pending' }] } });
+    if (url.endsWith('/launchers')) return Response.json({ launchers: [] });
+    if (url.endsWith('/snapshot')) return Response.json({ bridge: 'connected', ts: Date.now(), agents: [{ paneId: 'task', workspaceId: 'w1', tabId: 't1', agent: 'claude', cwd: '/work', status: 'idle' }], shellPanes: [] });
+    throw new Error(`unexpected ${url}`);
+  }) as typeof fetch;
+  try {
+    await mount();
+    if (settlement === 'local') {
+      await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Approve stage')!.click());
+      expect(container.textContent).toContain('Reply saved; stage not dispatched');
+    } else {
+      answered = true;
+      await act(async () => {
+        for (const [id, timer] of [...timers]) if (timer.delay === 2000) { timers.delete(id); timer.callback(); }
+      });
+    }
+    await act(async () => {
+      for (const [id, timer] of [...timers]) if (timer.delay === 2000 || timer.delay === 5000) { timers.delete(id); timer.callback(); }
+    });
+    expect(container.textContent).toContain(settlement === 'local' ? 'Reply saved; stage not dispatched' : 'Cooperation state changed');
+    const inspect = [...container.querySelectorAll('button')].find(button => button.textContent === 'Inspect stage state');
+    expect(inspect).toBeDefined();
+    await act(async () => inspect!.click());
+    expect(container.textContent).toContain('prepare: pending');
+  } finally { window.setTimeout = schedule; window.clearTimeout = cancel; }
+});
+}

@@ -57,6 +57,7 @@ function questionModel(question: CooperationQuestion): Question {
 export function validateCooperation(value: unknown): asserts value is CooperationState {
   requireValue(object(value) && Number.isInteger(value.revision) && Number(value.revision) >= 0 &&
     Number.isInteger(value.budget) && Number(value.budget) >= 0 && finite(value.delayPenaltyPerMs), '无效协作状态');
+  requireValue(value.agentDone === undefined || typeof value.agentDone === 'boolean', '无效完成标识');
   requireValue(object(value.task) && text(value.task.runId) && Array.isArray(value.task.steps) &&
     object(value.task.requirements) && Array.isArray(value.task.events), '无效任务记录');
   for (const requirement of Object.values(value.task.requirements)) {
@@ -69,11 +70,13 @@ export function validateCooperation(value: unknown): asserts value is Cooperatio
       finite(step.durationMs) && ['pending', 'waiting', 'running', 'done', 'unknown'].includes(String(step.status)) &&
       (step.artifactVersion === undefined || text(step.artifactVersion)), '无效阶段');
   }
+  requireValue(value.task.events.every(event => object(event) && text(event.kind) && typeof event.detail === 'string'), '无效任务事件');
   const state = value as unknown as CooperationState;
   validateGraph(state.task.steps);
   requireValue(Array.isArray(state.questions) && Array.isArray(state.requests) &&
     Array.isArray(state.checkItems) && Array.isArray(state.checks) && Array.isArray(state.scores) &&
-    object(state.instructions), '无效协作集合');
+    object(state.instructions) && Object.values(state.instructions).every(text), '无效协作集合');
+  requireValue(state.questions.every(object) && state.checkItems.every(object), '无效问题或检查项');
   requireValue(new Set(state.questions.map(q => q.id)).size === state.questions.length &&
     new Set(state.questions.map(q => q.requirementId)).size === state.questions.length, '同一要求必须合并为一个问题');
   for (const q of state.questions) {
@@ -84,8 +87,9 @@ export function validateCooperation(value: unknown): asserts value is Cooperatio
     '问题须为用户可决定的未决要求；环境事实应先用工具查询');
     requireValue(Object.hasOwn(state.task.requirements, q.requirementId), '问题必须关联任务要求');
     requireValue(q.kind !== 'approval' || scope(q.operation), '审批必须提供精确操作范围');
-    requireValue(Array.isArray(q.answers) && q.answers.length > 0 && new Set(q.answers.map(a => a.id)).size === q.answers.length &&
-      q.answers.every(a => object(a) && text(a.id) && a.id !== '__free_text__' && text(a.consequence)), '无效候选回答');
+    requireValue(Array.isArray(q.answers) && q.answers.length > 0 && q.answers.every(object) &&
+      new Set(q.answers.map(a => a.id)).size === q.answers.length &&
+      q.answers.every(a => text(a.id) && a.id !== '__free_text__' && text(a.consequence)), '无效候选回答');
     requireValue(q.kind !== 'approval' || q.answers.some(a => a.id === 'approve') && q.answers.some(a => a.id === 'deny'), '审批需有 approve / deny 选项');
     scoreQuestion(questionModel(q), 0, state.delayPenaltyPerMs);
     requireValue(q.required || q.kind === 'approval' || q.answers.some(a => a.id === q.defaultAnswerId), '可选偏好需声明默认回答');
@@ -103,16 +107,35 @@ export function validateCooperation(value: unknown): asserts value is Cooperatio
     requireValue(object(item) && text(item.id) && ids.has(item.stepId) && typeof item.required === 'boolean' &&
       Object.hasOwn(state.task.requirements, item.requirementId), '无效检查项');
   }
+  requireValue(state.requests.every(object) && new Set(state.requests.map(r => r.id)).size === state.requests.length,
+    '无效或重复协作请求');
   for (const request of state.requests) {
-    requireValue(object(request) && text(request.id) && request.runId === state.task.runId &&
+    const q = state.questions.find(q => q.id === request.questionId);
+    requireValue(text(request.id) && request.runId === state.task.runId && q && request.kind === q.kind &&
+      text(request.createdAt) && Number.isFinite(Date.parse(request.createdAt)) &&
       ['pending', 'resolved', 'expired'].includes(request.status) && object(request.requirementVersions) &&
-      state.questions.some(q => q.id === request.questionId), '无效协作请求');
+      Object.hasOwn(request.requirementVersions, q.requirementId) &&
+      Object.entries(request.requirementVersions).every(([id, version]) => Object.hasOwn(state.task.requirements, id) &&
+        Number.isInteger(version) && version >= 0) &&
+      Array.isArray(request.options) && request.options.length > 0 &&
+      request.options.every(option => object(option) && text(option.id) && text(option.label) && q.answers.some(a => a.id === option.id)) &&
+      new Set(request.options.map(option => option.id)).size === request.options.length &&
+      (request.kind !== 'approval' || scope(request.operation)), '无效协作请求');
+    requireValue(request.result === undefined || object(request.result) &&
+      ['accepted', 'stale', 'reconfirm'].includes(request.result.status) && typeof request.result.detail === 'string', '无效回答结果');
+    requireValue((request.status === 'resolved') === (request.result?.status === 'accepted') &&
+      (request.status !== 'pending' || request.result === undefined), '请求状态与回答结果不一致');
   }
   for (const check of state.checks) {
     requireValue(object(check) && check.runId === state.task.runId && text(check.artifactVersion) &&
+      Number.isInteger(check.requirementVersion) && check.requirementVersion >= 0 &&
       ['passed', 'failed', 'unknown'].includes(check.status) && typeof check.evidenceLocation === 'string' &&
+      (check.missingEvidence === undefined || typeof check.missingEvidence === 'string') &&
+      (check.status === 'unknown' ? !!check.missingEvidence?.trim() : !!check.evidenceLocation.trim()) &&
       state.checkItems.some(item => item.id === check.checkId), '无效检查记录');
   }
+  requireValue(state.scores.every(score => object(score) && state.questions.some(q => q.id === score.questionId) &&
+    typeof score.score === 'number' && Number.isFinite(score.score) && finite(score.workMs) && finite(score.stallMs)), '无效问题评分');
 }
 export function createCooperation(input: unknown, occurrence: TaskOccurrence): CooperationState {
   requireValue(object(input), '需要协作计划');
@@ -227,6 +250,11 @@ export function answerCooperation(state: CooperationState, requestId: string, op
   return { status: result.status === 'accepted' ? 'resolved' as const : 'expired' as const,
     outcome: result.status !== 'accepted' ? 'stale' as const : duplicate ? 'already-handled' as const : 'submitted' as const };
 }
+function invalidateChecks(state: CooperationState, affected: ReadonlySet<string>): void {
+  const ids = new Set(state.checkItems.filter(item => affected.has(item.stepId)).map(item => item.id));
+  // 检查事件仍保留审计历史，但即使复用产物版本，也不能恢复已废止的证据。
+  state.checks = state.checks.filter(check => !ids.has(check.checkId));
+}
 function reopenApprovals(state: CooperationState, affected: ReadonlySet<string>): void {
   for (const q of state.questions.filter(item => item.kind === 'approval')) {
     const steps = state.task.steps.filter(step => affected.has(step.id) && step.requirementIds.includes(q.requirementId));
@@ -250,6 +278,7 @@ export function updateCooperation(state: CooperationState, value: unknown): void
   if (value.kind === 'correction') {
     requireValue(object(value.changes) && Object.values(value.changes).every(v => typeof v === 'string'), '无效纠错');
     const affected = new Set(applyCorrection(state.task, value.changes as Record<string, string>, state.requests));
+    invalidateChecks(state, affected);
     state.task.steps.filter(step => affected.has(step.id)).forEach(step => { delete step.artifactVersion; });
     reopenApprovals(state, affected);
     // 重开受影响要求的问题；旧授权不能沿用。
@@ -274,6 +303,7 @@ export function updateCooperation(state: CooperationState, value: unknown): void
     state.task.steps.filter(step => downstream.has(step.id)).forEach(step => {
       step.status = 'pending'; step.authorized = false; delete step.artifactVersion;
     });
+    invalidateChecks(state, downstream);
     reopenApprovals(state, downstream);
     for (const step of affected) {
       requireValue(text(value.instructions[step.id]), '每个受影响阶段须提供新指令');
@@ -312,6 +342,7 @@ export function updateCooperation(state: CooperationState, value: unknown): void
     state.task.steps.filter(s => affected.has(s.id)).forEach(s => {
       s.status = 'pending'; s.authorized = false; delete s.artifactVersion;
     });
+    invalidateChecks(state, affected);
     reopenApprovals(state, affected);
   } else if (value.kind === 'authorize') {
     const step = state.task.steps.find(s => s.id === value.stepId);
